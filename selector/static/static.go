@@ -9,6 +9,7 @@ import (
 	"github.com/micro/go-micro/cmd"
 	"github.com/micro/go-micro/registry"
 	"github.com/micro/go-micro/selector"
+	"strings"
 )
 
 const (
@@ -36,9 +37,14 @@ func (s *staticSelector) Options() selector.Options {
 }
 
 func (s *staticSelector) Select(service string, opts ...selector.SelectOption) (selector.Next, error) {
+
+	address := fmt.Sprintf("%v%v", service, s.addressSuffix)
+
+	address = strings.Replace(address,".","-",-1)
+
 	node := &registry.Node{
 		Id:      service,
-		Address: fmt.Sprintf("%v%v", service, s.addressSuffix),
+		Address: address,
 	}
 
 	return func() (*registry.Node, error) {
