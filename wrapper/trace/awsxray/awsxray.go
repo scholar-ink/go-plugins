@@ -5,6 +5,7 @@ import (
 	"context"
 	"github.com/asim/go-awsxray"
 	"github.com/micro/go-micro/client"
+	"github.com/micro/go-micro/registry"
 	"github.com/micro/go-micro/server"
 )
 
@@ -19,7 +20,7 @@ func (x *xrayWrapper) Call(ctx context.Context, req client.Request, rsp interfac
 	s := getSegment(x.opts.Name, ctx)
 
 	defer func() {
-		setCallStatus(s, req.Service(), req.Method(), err)
+		setCallStatus(s, req.Service(), req.Endpoint(), err)
 		go record(x.x, s)
 	}()
 
@@ -42,17 +43,17 @@ func NewCallWrapper(opts ...Option) client.CallWrapper {
 	x := newXRay(options)
 
 	return func(cf client.CallFunc) client.CallFunc {
-		return func(ctx context.Context, addr string, req client.Request, rsp interface{}, opts client.CallOptions) error {
+		return func(ctx context.Context, node *registry.Node, req client.Request, rsp interface{}, opts client.CallOptions) error {
 			var err error
 			s := getSegment(options.Name, ctx)
 
 			defer func() {
-				setCallStatus(s, addr, req.Method(), err)
+				setCallStatus(s, node.Address, req.Endpoint(), err)
 				go record(x, s)
 			}()
 
 			ctx = newContext(ctx, s)
-			err = cf(ctx, addr, req, rsp, opts)
+			err = cf(ctx, node, req, rsp, opts)
 			return err
 		}
 	}
@@ -91,14 +92,14 @@ func NewHandlerWrapper(opts ...Option) server.HandlerWrapper {
 			name := options.Name
 			if len(name) == 0 {
 				// default name
-				name = req.Service() + "." + req.Method()
+				name = req.Service() + "." + req.Endpoint()
 			}
 
 			var err error
 			s := getSegment(name, ctx)
 
 			defer func() {
-				setCallStatus(s, req.Service(), req.Method(), err)
+				setCallStatus(s, req.Service(), req.Endpoint(), err)
 				go record(x, s)
 			}()
 

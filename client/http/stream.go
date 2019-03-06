@@ -50,6 +50,10 @@ func (h *httpStream) Request() client.Request {
 	return h.request
 }
 
+func (h *httpStream) Response() client.Response {
+	return nil
+}
+
 func (h *httpStream) Send(msg interface{}) error {
 	h.Lock()
 	defer h.Unlock()
@@ -72,7 +76,7 @@ func (h *httpStream) Send(msg interface{}) error {
 		URL: &url.URL{
 			Scheme: "http",
 			Host:   h.address,
-			Path:   h.request.Method(),
+			Path:   h.request.Endpoint(),
 		},
 		Header:        h.header,
 		Body:          buf,

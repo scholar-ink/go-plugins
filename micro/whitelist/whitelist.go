@@ -45,6 +45,10 @@ func (w *whitelist) String() string {
 	return "whitelist"
 }
 
+func NewPlugin() plugin.Plugin {
+	return NewRPCWhitelist()
+}
+
 func NewRPCWhitelist(services ...string) plugin.Plugin {
 	list := make(map[string]bool)
 

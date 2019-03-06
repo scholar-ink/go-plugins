@@ -51,6 +51,35 @@ func init() {
 	cmd.DefaultRegistries["kubernetes"] = NewRegistry
 }
 
+func configure(k *kregistry, opts ...registry.Option) error {
+	for _, o := range opts {
+		o(&k.options)
+	}
+
+	// get first host
+	var host string
+	if len(k.options.Addrs) > 0 && len(k.options.Addrs[0]) > 0 {
+		host = k.options.Addrs[0]
+	}
+
+	if k.options.Timeout == 0 {
+		k.options.Timeout = time.Second * 1
+	}
+
+	// if no hosts setup, assume InCluster
+	var c client.Kubernetes
+	if len(host) == 0 {
+		c = client.NewClientInCluster()
+	} else {
+		c = client.NewClientByHost(host)
+	}
+
+	k.client = c
+	k.timeout = k.options.Timeout
+
+	return nil
+}
+
 // serviceName generates a valid service name for k8s labels
 func serviceName(name string) string {
 	aname := make([]byte, len(name))
@@ -64,6 +93,11 @@ func serviceName(name string) string {
 	}
 
 	return string(aname)
+}
+
+// Init allows reconfig of options
+func (c *kregistry) Init(opts ...registry.Option) error {
+	return configure(c, opts...)
 }
 
 // Options returns the registry Options
@@ -237,33 +271,9 @@ func (c *kregistry) String() string {
 
 // NewRegistry creates a kubernetes registry
 func NewRegistry(opts ...registry.Option) registry.Registry {
-
-	var options registry.Options
-	for _, o := range opts {
-		o(&options)
+	k := &kregistry{
+		options: registry.Options{},
 	}
-
-	// get first host
-	var host string
-	if len(options.Addrs) > 0 && len(options.Addrs[0]) > 0 {
-		host = options.Addrs[0]
-	}
-
-	if options.Timeout == 0 {
-		options.Timeout = time.Second * 1
-	}
-
-	// if no hosts setup, assume InCluster
-	var c client.Kubernetes
-	if len(host) == 0 {
-		c = client.NewClientInCluster()
-	} else {
-		c = client.NewClientByHost(host)
-	}
-
-	return &kregistry{
-		client:  c,
-		options: options,
-		timeout: options.Timeout,
-	}
+	configure(k, opts...)
+	return k
 }

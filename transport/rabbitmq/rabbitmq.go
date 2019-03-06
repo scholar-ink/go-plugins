@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"errors"
-	uuid "github.com/nu7hatch/gouuid"
+	"github.com/google/uuid"
 	"github.com/streadway/amqp"
 
 	"github.com/micro/go-micro/cmd"
@@ -32,17 +32,21 @@ type rmqtport struct {
 }
 
 type rmqtportClient struct {
-	rt    *rmqtport
-	addr  string
-	corId string
-	reply chan amqp.Delivery
+	rt     *rmqtport
+	addr   string
+	corId  string
+	local  string
+	remote string
+	reply  chan amqp.Delivery
 }
 
 type rmqtportSocket struct {
-	rt    *rmqtport
-	conn  *rabbitMQConn
-	d     *amqp.Delivery
-	close chan bool
+	rt     *rmqtport
+	conn   *rabbitMQConn
+	d      *amqp.Delivery
+	close  chan bool
+	local  string
+	remote string
 
 	sync.Mutex
 	r  chan *amqp.Delivery
@@ -52,6 +56,7 @@ type rmqtportSocket struct {
 type rmqtportListener struct {
 	rt   *rmqtport
 	conn *rabbitMQConn
+	exit chan bool
 	addr string
 
 	sync.RWMutex
@@ -64,6 +69,14 @@ var (
 
 func init() {
 	cmd.DefaultTransports["rabbitmq"] = NewTransport
+}
+
+func (r *rmqtportClient) Local() string {
+	return r.local
+}
+
+func (r *rmqtportClient) Remote() string {
+	return r.remote
 }
 
 func (r *rmqtportClient) Send(m *transport.Message) error {
@@ -131,6 +144,14 @@ func (r *rmqtportClient) Recv(m *transport.Message) error {
 func (r *rmqtportClient) Close() error {
 	r.rt.popReq(r.corId)
 	return nil
+}
+
+func (r *rmqtportSocket) Local() string {
+	return r.local
+}
+
+func (r *rmqtportSocket) Remote() string {
+	return r.remote
 }
 
 func (r *rmqtportSocket) Recv(m *transport.Message) error {
@@ -225,59 +246,92 @@ func (r *rmqtportListener) Addr() string {
 }
 
 func (r *rmqtportListener) Close() error {
+	r.exit <- true
 	r.conn.Close()
 	return nil
 }
 
 func (r *rmqtportListener) Accept(fn func(transport.Socket)) error {
+	for {
+		// connect if not connected
+		if !r.conn.IsConnected() {
+			// reinitialise
+			<-r.conn.Init(r.rt.opts.Secure, r.rt.opts.TLSConfig)
+		}
+
+		// accept connections
+		exit, err := r.accept(fn)
+		if err != nil {
+			return err
+		}
+
+		// connection closed
+		if exit {
+			return nil
+		}
+	}
+}
+
+func (r *rmqtportListener) accept(fn func(transport.Socket)) (bool, error) {
 	deliveries, err := r.conn.Consume(r.addr)
 	if err != nil {
-		return err
+		return false, err
 	}
 
-	for d := range deliveries {
-		r.RLock()
-		sock, ok := r.so[d.CorrelationId]
-		r.RUnlock()
-		if !ok {
-			sock = &rmqtportSocket{
-				rt:    r.rt,
-				d:     &d,
-				r:     make(chan *amqp.Delivery, 1),
-				conn:  r.conn,
-				close: make(chan bool, 1),
+	for {
+		select {
+		case <-r.exit:
+			return true, nil
+		case d, ok := <-deliveries:
+			if !ok {
+				return false, nil
 			}
-			r.Lock()
-			r.so[sock.d.CorrelationId] = sock
-			r.Unlock()
 
-			go func() {
-				<-sock.close
+			r.RLock()
+			sock, ok := r.so[d.CorrelationId]
+			r.RUnlock()
+			if !ok {
+				sock = &rmqtportSocket{
+					rt:     r.rt,
+					d:      &d,
+					r:      make(chan *amqp.Delivery, 1),
+					conn:   r.conn,
+					close:  make(chan bool, 1),
+					local:  r.Addr(),
+					remote: d.CorrelationId,
+				}
 				r.Lock()
-				delete(r.so, sock.d.CorrelationId)
+				r.so[sock.d.CorrelationId] = sock
 				r.Unlock()
-			}()
 
-			go fn(sock)
-		}
+				go func() {
+					<-sock.close
+					r.Lock()
+					delete(r.so, sock.d.CorrelationId)
+					r.Unlock()
+				}()
 
-		select {
-		case <-sock.close:
-			continue
-		default:
-		}
+				go fn(sock)
+			}
 
-		sock.Lock()
-		sock.bl = append(sock.bl, &d)
-		select {
-		case sock.r <- sock.bl[0]:
-			sock.bl = sock.bl[1:]
-		default:
+			select {
+			case <-sock.close:
+				continue
+			default:
+			}
+
+			sock.Lock()
+			sock.bl = append(sock.bl, &d)
+			select {
+			case sock.r <- sock.bl[0]:
+				sock.bl = sock.bl[1:]
+			default:
+			}
+			sock.Unlock()
 		}
-		sock.Unlock()
 	}
 
-	return nil
+	return false, nil
 }
 
 func (r *rmqtport) putReq(id string) chan amqp.Delivery {
@@ -330,7 +384,7 @@ func (r *rmqtport) handle(delivery amqp.Delivery) {
 }
 
 func (r *rmqtport) Dial(addr string, opts ...transport.DialOption) (transport.Client, error) {
-	id, err := uuid.NewV4()
+	id, err := uuid.NewRandom()
 	if err != nil {
 		return nil, err
 	}
@@ -338,16 +392,18 @@ func (r *rmqtport) Dial(addr string, opts ...transport.DialOption) (transport.Cl
 	r.once.Do(r.init)
 
 	return &rmqtportClient{
-		rt:    r,
-		addr:  addr,
-		corId: id.String(),
-		reply: r.putReq(id.String()),
+		rt:     r,
+		addr:   addr,
+		corId:  id.String(),
+		reply:  r.putReq(id.String()),
+		local:  id.String(),
+		remote: addr,
 	}, nil
 }
 
 func (r *rmqtport) Listen(addr string, opts ...transport.ListenOption) (transport.Listener, error) {
 	if len(addr) == 0 || addr == ":0" {
-		id, err := uuid.NewV4()
+		id, err := uuid.NewRandom()
 		if err != nil {
 			return nil, err
 		}
@@ -361,8 +417,23 @@ func (r *rmqtport) Listen(addr string, opts ...transport.ListenOption) (transpor
 		rt:   r,
 		addr: addr,
 		conn: conn,
+		exit: make(chan bool, 1),
 		so:   make(map[string]*rmqtportSocket),
 	}, nil
+}
+
+func (r *rmqtport) Init(opts ...transport.Option) error {
+	for _, o := range opts {
+		o(&r.opts)
+	}
+	r.addrs = r.opts.Addrs
+	r.conn.Close()
+	r.conn = newRabbitMQConn("", r.opts.Addrs)
+	return nil
+}
+
+func (r *rmqtport) Options() transport.Options {
+	return r.opts
 }
 
 func (r *rmqtport) String() string {

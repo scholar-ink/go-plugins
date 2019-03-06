@@ -29,6 +29,55 @@ func init() {
 	cmd.DefaultRegistries["zookeeper"] = NewRegistry
 }
 
+func configure(z *zookeeperRegistry, opts ...registry.Option) error {
+	cAddrs := z.options.Addrs
+
+	for _, o := range opts {
+		o(&z.options)
+	}
+
+	if z.options.Timeout == 0 {
+		z.options.Timeout = 5
+	}
+
+	// already set
+	if z.client != nil && len(z.options.Addrs) == len(cAddrs) {
+		return nil
+	}
+
+	// reset
+	cAddrs = nil
+
+	for _, addr := range z.options.Addrs {
+		if len(addr) == 0 {
+			continue
+		}
+		cAddrs = append(cAddrs, addr)
+	}
+
+	if len(cAddrs) == 0 {
+		cAddrs = []string{"127.0.0.1:2181"}
+	}
+
+	// connect to zookeeper
+	c, _, err := zk.Connect(cAddrs, time.Second*z.options.Timeout)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// create our prefix path
+	if err := createPath(prefix, []byte{}, c); err != nil {
+		log.Fatal(err)
+	}
+
+	z.client = c
+	return nil
+}
+
+func (z *zookeeperRegistry) Init(opts ...registry.Option) error {
+	return configure(z, opts...)
+}
+
 func (z *zookeeperRegistry) Options() registry.Options {
 	return z.options
 }

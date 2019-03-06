@@ -77,6 +77,6 @@ func (sa *stats_auth) String() string {
 	return "stats_auth"
 }
 
-func New() plugin.Plugin {
+func NewPlugin() plugin.Plugin {
 	return &stats_auth{}
 }

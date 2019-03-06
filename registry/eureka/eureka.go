@@ -36,17 +36,13 @@ func init() {
 	logging.SetLevel(logging.ERROR, "fargo")
 }
 
-func newRegistry(opts ...registry.Option) registry.Registry {
-	options := registry.Options{
-		Context: context.Background(),
-	}
-
+func configure(e *eurekaRegistry, opts ...registry.Option) error {
 	for _, o := range opts {
-		o(&options)
+		o(&e.opts)
 	}
 
 	var cAddrs []string
-	for _, addr := range options.Addrs {
+	for _, addr := range e.opts.Addrs {
 		if len(addr) == 0 {
 			continue
 		}
@@ -57,17 +53,28 @@ func newRegistry(opts ...registry.Option) registry.Registry {
 		cAddrs = []string{"http://localhost:8080/eureka/v2"}
 	}
 
-	if c, ok := options.Context.Value(contextHttpClient{}).(*http.Client); ok {
+	if c, ok := e.opts.Context.Value(contextHttpClient{}).(*http.Client); ok {
 		fargo.HttpClient = c
 	}
 
 	conn := fargo.NewConn(cAddrs...)
 	conn.PollInterval = time.Second * 5
+	e.conn = &conn
+	return nil
+}
 
-	return &eurekaRegistry{
-		conn: &conn,
-		opts: options,
+func newRegistry(opts ...registry.Option) registry.Registry {
+	e := &eurekaRegistry{
+		opts: registry.Options{
+			Context: context.Background(),
+		},
 	}
+	configure(e, opts...)
+	return e
+}
+
+func (e *eurekaRegistry) Init(opts ...registry.Option) error {
+	return configure(e, opts...)
 }
 
 func (e *eurekaRegistry) Options() registry.Options {

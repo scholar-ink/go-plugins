@@ -10,9 +10,9 @@ import (
 	"time"
 
 	"github.com/micro/go-micro/cmd"
+	"github.com/micro/go-micro/codec/json"
 	"github.com/micro/go-micro/server"
 	"github.com/micro/go-micro/transport"
-	"github.com/micro/go-micro/transport/codec/json"
 	"github.com/nats-io/go-nats"
 )
 
@@ -23,11 +23,13 @@ type ntport struct {
 }
 
 type ntportClient struct {
-	conn *nats.Conn
-	addr string
-	id   string
-	sub  *nats.Subscription
-	opts transport.Options
+	conn   *nats.Conn
+	addr   string
+	id     string
+	local  string
+	remote string
+	sub    *nats.Subscription
+	opts   transport.Options
 }
 
 type ntportSocket struct {
@@ -40,7 +42,9 @@ type ntportSocket struct {
 	sync.Mutex
 	bl []*nats.Msg
 
-	opts transport.Options
+	opts   transport.Options
+	local  string
+	remote string
 }
 
 type ntportListener struct {
@@ -62,6 +66,38 @@ func init() {
 	cmd.DefaultTransports["nats"] = NewTransport
 }
 
+func configure(n *ntport, opts ...transport.Option) {
+	for _, o := range opts {
+		o(&n.opts)
+	}
+
+	natsOptions := nats.GetDefaultOptions()
+	if n, ok := n.opts.Context.Value(optionsKey{}).(nats.Options); ok {
+		natsOptions = n
+	}
+
+	// transport.Options have higher priority than nats.Options
+	// only if Addrs, Secure or TLSConfig were not set through a transport.Option
+	// we read them from nats.Option
+	if len(n.opts.Addrs) == 0 {
+		n.opts.Addrs = natsOptions.Servers
+	}
+
+	if !n.opts.Secure {
+		n.opts.Secure = natsOptions.Secure
+	}
+
+	if n.opts.TLSConfig == nil {
+		n.opts.TLSConfig = natsOptions.TLSConfig
+	}
+
+	// check & add nats:// prefix (this makes also sure that the addresses
+	// stored in natsRegistry.addrs and options.Addrs are identical)
+	n.opts.Addrs = setAddrs(n.opts.Addrs)
+	n.nopts = natsOptions
+	n.addrs = n.opts.Addrs
+}
+
 func setAddrs(addrs []string) []string {
 	var cAddrs []string
 	for _, addr := range addrs {
@@ -77,6 +113,14 @@ func setAddrs(addrs []string) []string {
 		cAddrs = []string{nats.DefaultURL}
 	}
 	return cAddrs
+}
+
+func (n *ntportClient) Local() string {
+	return n.local
+}
+
+func (n *ntportClient) Remote() string {
+	return n.remote
 }
 
 func (n *ntportClient) Send(m *transport.Message) error {
@@ -129,6 +173,14 @@ func (n *ntportClient) Close() error {
 	n.sub.Unsubscribe()
 	n.conn.Close()
 	return nil
+}
+
+func (n *ntportSocket) Local() string {
+	return n.local
+}
+
+func (n *ntportSocket) Remote() string {
+	return n.remote
 }
 
 func (n *ntportSocket) Recv(m *transport.Message) error {
@@ -222,11 +274,9 @@ func (n *ntportListener) Accept(fn func(transport.Socket)) error {
 		return err
 	}
 
-	var lerr error
-
 	go func() {
 		<-n.exit
-		lerr = s.Unsubscribe()
+		s.Unsubscribe()
 	}()
 
 	for {
@@ -243,11 +293,13 @@ func (n *ntportListener) Accept(fn func(transport.Socket)) error {
 
 		if !ok {
 			sock = &ntportSocket{
-				conn:  n.conn,
-				m:     m,
-				r:     make(chan *nats.Msg, 1),
-				close: make(chan bool),
-				opts:  n.opts,
+				conn:   n.conn,
+				m:      m,
+				r:      make(chan *nats.Msg, 1),
+				close:  make(chan bool),
+				opts:   n.opts,
+				local:  n.Addr(),
+				remote: m.Reply,
 			}
 			n.Lock()
 			n.so[m.Reply] = sock
@@ -321,11 +373,13 @@ func (n *ntport) Dial(addr string, dialOpts ...transport.DialOption) (transport.
 	}
 
 	return &ntportClient{
-		conn: c,
-		addr: addr,
-		id:   id,
-		sub:  sub,
-		opts: n.opts,
+		conn:   c,
+		addr:   addr,
+		id:     id,
+		sub:    sub,
+		opts:   n.opts,
+		local:  id,
+		remote: addr,
 	}, nil
 }
 
@@ -370,50 +424,30 @@ func (n *ntport) Listen(addr string, listenOpts ...transport.ListenOption) (tran
 	}, nil
 }
 
+func (n *ntport) Init(opts ...transport.Option) error {
+	configure(n, opts...)
+	return nil
+}
+
+func (n *ntport) Options() transport.Options {
+	return n.opts
+}
+
 func (n *ntport) String() string {
 	return "nats"
 }
 
 func NewTransport(opts ...transport.Option) transport.Transport {
-
 	options := transport.Options{
 		// Default codec
-		Codec:   json.NewCodec(),
+		Codec:   json.Marshaler{},
 		Timeout: DefaultTimeout,
 		Context: context.Background(),
 	}
 
-	for _, o := range opts {
-		o(&options)
+	nt := &ntport{
+		opts: options,
 	}
-
-	natsOptions := nats.GetDefaultOptions()
-	if n, ok := options.Context.Value(optionsKey{}).(nats.Options); ok {
-		natsOptions = n
-	}
-
-	// transport.Options have higher priority than nats.Options
-	// only if Addrs, Secure or TLSConfig were not set through a transport.Option
-	// we read them from nats.Option
-	if len(options.Addrs) == 0 {
-		options.Addrs = natsOptions.Servers
-	}
-
-	if !options.Secure {
-		options.Secure = natsOptions.Secure
-	}
-
-	if options.TLSConfig == nil {
-		options.TLSConfig = natsOptions.TLSConfig
-	}
-
-	// check & add nats:// prefix (this makes also sure that the addresses
-	// stored in natsRegistry.addrs and options.Addrs are identical)
-	options.Addrs = setAddrs(options.Addrs)
-
-	return &ntport{
-		addrs: options.Addrs,
-		opts:  options,
-		nopts: natsOptions,
-	}
+	configure(nt, opts...)
+	return nt
 }

@@ -5,14 +5,16 @@ import (
 	"testing"
 
 	"github.com/micro/go-micro/registry"
-	"github.com/micro/go-micro/registry/mock"
+	"github.com/micro/go-micro/registry/memory"
 	"github.com/micro/go-micro/selector"
 )
 
 func TestDefaultSelector(t *testing.T) {
 	counts := map[string]int{}
 
-	rs := newSelector(selector.Registry(mock.NewRegistry()))
+	r := memory.NewRegistry()
+	r.(*memory.Registry).Setup()
+	rs := newSelector(selector.Registry(r))
 
 	next, err := rs.Select("foo")
 	if err != nil {
@@ -31,7 +33,7 @@ func TestDefaultSelector(t *testing.T) {
 }
 
 func TestBlackList(t *testing.T) {
-	r := mock.NewRegistry()
+	r := memory.NewRegistry()
 
 	r.Register(&registry.Service{
 		Name: "test",

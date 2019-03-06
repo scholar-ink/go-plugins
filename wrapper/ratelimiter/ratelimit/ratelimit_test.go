@@ -9,7 +9,7 @@ import (
 	"github.com/juju/ratelimit"
 	"github.com/micro/go-micro/client"
 	"github.com/micro/go-micro/errors"
-	"github.com/micro/go-micro/registry/mock"
+	"github.com/micro/go-micro/registry/memory"
 	"github.com/micro/go-micro/selector"
 	"github.com/micro/go-micro/server"
 )
@@ -24,7 +24,7 @@ func (t *testHandler) Method(ctx context.Context, req *TestRequest, rsp *TestRes
 
 func TestRateClientLimit(t *testing.T) {
 	// setup
-	r := mock.NewRegistry()
+	r := memory.NewRegistry()
 	s := selector.NewSelector(selector.Registry(r))
 
 	testRates := []int{1, 10, 20, 100}
@@ -65,7 +65,7 @@ func TestRateClientLimit(t *testing.T) {
 
 func TestRateServerLimit(t *testing.T) {
 	// setup
-	r := mock.NewRegistry()
+	r := memory.NewRegistry()
 	s := selector.NewSelector(selector.Registry(r))
 
 	testRates := []int{1, 10, 20}
@@ -96,10 +96,6 @@ func TestRateServerLimit(t *testing.T) {
 			t.Fatalf("Unexpected error starting server: %v", err)
 		}
 
-		if err := s.Register(); err != nil {
-			t.Fatalf("Unexpected error registering server: %v", err)
-		}
-
 		req := c.NewRequest(name, "Test.Method", &TestRequest{}, client.WithContentType("application/json"))
 		rsp := TestResponse{}
 
@@ -119,7 +115,6 @@ func TestRateServerLimit(t *testing.T) {
 			t.Fatalf("Expected rate limit error, got %v", err)
 		}
 
-		s.Deregister()
 		s.Stop()
 
 		// artificial test delay

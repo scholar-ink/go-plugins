@@ -7,11 +7,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/micro/go-micro/broker"
-	"github.com/micro/go-micro/broker/codec/json"
 	"github.com/micro/go-micro/cmd"
+	"github.com/micro/go-micro/codec/json"
 	"github.com/nsqio/go-nsq"
-	"github.com/pborman/uuid"
 )
 
 type nsqBroker struct {
@@ -59,12 +59,24 @@ func (n *nsqBroker) Init(opts ...broker.Option) error {
 		o(&n.opts)
 	}
 
-	n.initByContext(n.opts.Context)
+	var addrs []string
 
+	for _, addr := range n.opts.Addrs {
+		if len(addr) > 0 {
+			addrs = append(addrs, addr)
+		}
+	}
+
+	if len(addrs) == 0 {
+		addrs = []string{"127.0.0.1:4150"}
+	}
+
+	n.addrs = addrs
+	n.configure(n.opts.Context)
 	return nil
 }
 
-func (n *nsqBroker) initByContext(ctx context.Context) {
+func (n *nsqBroker) configure(ctx context.Context) {
 	if v, ok := ctx.Value(lookupdAddrsKey{}).([]string); ok {
 		n.lookupdAddrs = v
 	}
@@ -111,7 +123,7 @@ func (n *nsqBroker) Connect() error {
 	for _, c := range n.c {
 		channel := c.opts.Queue
 		if len(channel) == 0 {
-			channel = uuid.NewUUID().String() + "#ephemeral"
+			channel = uuid.New().String() + "#ephemeral"
 		}
 
 		cm, err := nsq.NewConsumer(c.topic, channel, n.config)
@@ -232,7 +244,7 @@ func (n *nsqBroker) Subscribe(topic string, handler broker.Handler, opts ...brok
 	}
 	channel := options.Queue
 	if len(channel) == 0 {
-		channel = uuid.NewUUID().String() + "#ephemeral"
+		channel = uuid.New().String() + "#ephemeral"
 	}
 	config := *n.config
 	config.MaxInFlight = maxInFlight
@@ -317,7 +329,7 @@ func (s *subscriber) Unsubscribe() error {
 func NewBroker(opts ...broker.Option) broker.Broker {
 	options := broker.Options{
 		// Default codec
-		Codec: json.NewCodec(),
+		Codec: json.Marshaler{},
 		// Default context
 		Context: context.Background(),
 	}
@@ -338,9 +350,12 @@ func NewBroker(opts ...broker.Option) broker.Broker {
 		addrs = []string{"127.0.0.1:4150"}
 	}
 
-	return &nsqBroker{
+	n := &nsqBroker{
 		addrs:  addrs,
 		opts:   options,
 		config: nsq.NewConfig(),
 	}
+	n.configure(n.opts.Context)
+
+	return n
 }

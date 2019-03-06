@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/micro/go-micro/registry/mock"
+	"github.com/micro/go-micro/registry/memory"
 	"github.com/micro/go-micro/server"
-	"github.com/micro/grpc-go"
+	"google.golang.org/grpc"
 
 	pb "github.com/micro/examples/greeter/srv/proto/hello"
 )
@@ -21,7 +21,7 @@ func (s *sayServer) Hello(ctx context.Context, req *pb.Request, rsp *pb.Response
 }
 
 func TestGRPCServer(t *testing.T) {
-	r := mock.NewRegistry()
+	r := memory.NewRegistry()
 	s := NewServer(
 		server.Name("foo"),
 		server.Registry(r),
@@ -33,10 +33,6 @@ func TestGRPCServer(t *testing.T) {
 		t.Fatalf("failed to start: %v", err)
 	}
 
-	if err := s.Register(); err != nil {
-		t.Fatalf("failed to register: %v", err)
-	}
-
 	// check registration
 	services, err := r.GetService("foo")
 	if err != nil || len(services) == 0 {
@@ -44,10 +40,6 @@ func TestGRPCServer(t *testing.T) {
 	}
 
 	defer func() {
-		if err := s.Deregister(); err != nil {
-			t.Fatalf("failed to deregister: %v", err)
-		}
-
 		if err := s.Stop(); err != nil {
 			t.Fatalf("failed to stop: %v", err)
 		}
@@ -58,12 +50,12 @@ func TestGRPCServer(t *testing.T) {
 		t.Fatalf("failed to dial server: %v", err)
 	}
 
-	testMethods := []string{"Say.Hello", "/helloworld.Say/Hello", "/greeter.helloworld.Say/Hello"}
+	testMethods := []string{"/helloworld.Say/Hello", "/greeter.helloworld.Say/Hello"}
 
 	for _, method := range testMethods {
 		rsp := pb.Response{}
 
-		if err := grpc.Invoke(context.Background(), method, &pb.Request{Name: "John"}, &rsp, cc); err != nil {
+		if err := cc.Invoke(context.Background(), method, &pb.Request{Name: "John"}, &rsp); err != nil {
 			t.Fatalf("error calling server: %v", err)
 		}
 

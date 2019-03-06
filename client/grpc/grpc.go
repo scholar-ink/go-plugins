@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
-	errs "errors"
 	"fmt"
 	"sync"
 	"time"
@@ -14,15 +13,16 @@ import (
 	"github.com/micro/go-micro/client"
 	"github.com/micro/go-micro/cmd"
 	"github.com/micro/go-micro/codec"
-	errors "github.com/micro/go-micro/errors"
+	"github.com/micro/go-micro/errors"
 	"github.com/micro/go-micro/metadata"
 	"github.com/micro/go-micro/registry"
 	"github.com/micro/go-micro/selector"
 	"github.com/micro/go-micro/transport"
 
-	"github.com/micro/grpc-go"
-	"github.com/micro/grpc-go/credentials"
-	gmetadata "github.com/micro/grpc-go/metadata"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/encoding"
+	gmetadata "google.golang.org/grpc/metadata"
 )
 
 type grpcClient struct {
@@ -31,11 +31,10 @@ type grpcClient struct {
 	pool *pool
 }
 
-var (
-	errShutdown = errs.New("connection is shut down")
-)
-
 func init() {
+	encoding.RegisterCodec(jsonCodec{})
+	encoding.RegisterCodec(bytesCodec{})
+
 	cmd.DefaultClients["grpc"] = NewClient
 }
 
@@ -72,7 +71,12 @@ func (g *grpcClient) next(request client.Request, opts client.CallOptions) (sele
 	return next, nil
 }
 
-func (g *grpcClient) call(ctx context.Context, address string, req client.Request, rsp interface{}, opts client.CallOptions) error {
+func (g *grpcClient) call(ctx context.Context, node *registry.Node, req client.Request, rsp interface{}, opts client.CallOptions) error {
+	address := node.Address
+	if node.Port > 0 {
+		address = fmt.Sprintf("%s:%d", address, node.Port)
+	}
+
 	header := make(map[string]string)
 	if md, ok := metadata.FromContext(ctx); ok {
 		for k, v := range md {
@@ -93,9 +97,17 @@ func (g *grpcClient) call(ctx context.Context, address string, req client.Reques
 		return errors.InternalServerError("go.micro.client", err.Error())
 	}
 
+	maxRecvMsgSize := g.maxRecvMsgSizeValue()
+	maxSendMsgSize := g.maxSendMsgSizeValue()
+
 	var grr error
 
-	cc, err := g.pool.getConn(address, grpc.WithCodec(cf), grpc.WithTimeout(opts.DialTimeout), g.secure())
+	cc, err := g.pool.getConn(address, grpc.WithDefaultCallOptions(grpc.CallCustomCodec(cf)),
+		grpc.WithTimeout(opts.DialTimeout), g.secure(),
+		grpc.WithDefaultCallOptions(
+			grpc.MaxCallRecvMsgSize(maxRecvMsgSize),
+			grpc.MaxCallSendMsgSize(maxSendMsgSize),
+		))
 	if err != nil {
 		return errors.InternalServerError("go.micro.client", fmt.Sprintf("Error sending request: %v", err))
 	}
@@ -107,7 +119,7 @@ func (g *grpcClient) call(ctx context.Context, address string, req client.Reques
 	ch := make(chan error, 1)
 
 	go func() {
-		err := grpc.Invoke(ctx, methodToGRPC(req.Method(), req.Request()), req.Request(), rsp, cc.cc)
+		err := cc.Invoke(ctx, methodToGRPC(req.Endpoint(), req.Body()), req.Body(), rsp, grpc.CallContentSubtype(cf.String()))
 		ch <- microError(err)
 	}()
 
@@ -121,7 +133,12 @@ func (g *grpcClient) call(ctx context.Context, address string, req client.Reques
 	return grr
 }
 
-func (g *grpcClient) stream(ctx context.Context, address string, req client.Request, opts client.CallOptions) (client.Stream, error) {
+func (g *grpcClient) stream(ctx context.Context, node *registry.Node, req client.Request, opts client.CallOptions) (client.Stream, error) {
+	address := node.Address
+	if node.Port > 0 {
+		address = fmt.Sprintf("%s:%d", address, node.Port)
+	}
+
 	header := make(map[string]string)
 	if md, ok := metadata.FromContext(ctx); ok {
 		for k, v := range md {
@@ -150,18 +167,18 @@ func (g *grpcClient) stream(ctx context.Context, address string, req client.Requ
 		dialCtx, cancel = context.WithCancel(ctx)
 	}
 	defer cancel()
-	cc, err := grpc.DialContext(dialCtx, address, grpc.WithCodec(cf), g.secure())
+	cc, err := grpc.DialContext(dialCtx, address, grpc.WithDefaultCallOptions(grpc.CallCustomCodec(cf)), g.secure())
 	if err != nil {
 		return nil, errors.InternalServerError("go.micro.client", fmt.Sprintf("Error sending request: %v", err))
 	}
 
 	desc := &grpc.StreamDesc{
-		StreamName:    req.Service() + req.Method(),
+		StreamName:    req.Service() + req.Endpoint(),
 		ClientStreams: true,
 		ServerStreams: true,
 	}
 
-	st, err := cc.NewStream(ctx, desc, methodToGRPC(req.Method(), req.Request()))
+	st, err := cc.NewStream(ctx, desc, methodToGRPC(req.Endpoint(), req.Body()), grpc.CallContentSubtype(cf.String()))
 	if err != nil {
 		return nil, errors.InternalServerError("go.micro.client", fmt.Sprintf("Error creating stream: %v", err))
 	}
@@ -174,18 +191,40 @@ func (g *grpcClient) stream(ctx context.Context, address string, req client.Requ
 	}, nil
 }
 
+func (g *grpcClient) maxRecvMsgSizeValue() int {
+	if g.opts.Context == nil {
+		return DefaultMaxRecvMsgSize
+	}
+	v := g.opts.Context.Value(maxRecvMsgSizeKey{})
+	if v == nil {
+		return DefaultMaxRecvMsgSize
+	}
+	return v.(int)
+}
+
+func (g *grpcClient) maxSendMsgSizeValue() int {
+	if g.opts.Context == nil {
+		return DefaultMaxSendMsgSize
+	}
+	v := g.opts.Context.Value(maxSendMsgSizeKey{})
+	if v == nil {
+		return DefaultMaxSendMsgSize
+	}
+	return v.(int)
+}
+
 func (g *grpcClient) newGRPCCodec(contentType string) (grpc.Codec, error) {
-	codecs := make(map[string]grpc.Codec)
+	codecs := make(map[string]encoding.Codec)
 	if g.opts.Context != nil {
 		if v := g.opts.Context.Value(codecsKey{}); v != nil {
-			codecs = v.(map[string]grpc.Codec)
+			codecs = v.(map[string]encoding.Codec)
 		}
 	}
 	if c, ok := codecs[contentType]; ok {
-		return c, nil
+		return wrapCodec{c}, nil
 	}
 	if c, ok := defaultGRPCCodecs[contentType]; ok {
-		return c, nil
+		return wrapCodec{c}, nil
 	}
 	return nil, fmt.Errorf("Unsupported Content-Type: %s", contentType)
 }
@@ -251,7 +290,7 @@ func (g *grpcClient) Call(ctx context.Context, req client.Request, rsp interface
 	} else {
 		// got a deadline so no need to setup context
 		// but we need to set the timeout we pass along
-		opt := client.WithRequestTimeout(d.Sub(time.Now()))
+		opt := client.WithRequestTimeout(time.Until(d))
 		opt(&callOpts)
 	}
 
@@ -291,14 +330,8 @@ func (g *grpcClient) Call(ctx context.Context, req client.Request, rsp interface
 			return errors.InternalServerError("go.micro.client", err.Error())
 		}
 
-		// set the address
-		addr := node.Address
-		if node.Port > 0 {
-			addr = fmt.Sprintf("%s:%d", addr, node.Port)
-		}
-
 		// make the call
-		err = gcall(ctx, addr, req, rsp, callOpts)
+		err = gcall(ctx, node, req, rsp, callOpts)
 		g.opts.Selector.Mark(req.Service(), node, err)
 		return err
 	}
@@ -306,7 +339,7 @@ func (g *grpcClient) Call(ctx context.Context, req client.Request, rsp interface
 	ch := make(chan error, callOpts.Retries)
 	var gerr error
 
-	for i := 0; i < callOpts.Retries; i++ {
+	for i := 0; i <= callOpts.Retries; i++ {
 		go func() {
 			ch <- call(i)
 		}()
@@ -376,12 +409,7 @@ func (g *grpcClient) Stream(ctx context.Context, req client.Request, opts ...cli
 			return nil, errors.InternalServerError("go.micro.client", err.Error())
 		}
 
-		addr := node.Address
-		if node.Port > 0 {
-			addr = fmt.Sprintf("%s:%d", addr, node.Port)
-		}
-
-		stream, err := g.stream(ctx, addr, req, callOpts)
+		stream, err := g.stream(ctx, node, req, callOpts)
 		g.opts.Selector.Mark(req.Service(), node, err)
 		return stream, err
 	}
@@ -394,7 +422,7 @@ func (g *grpcClient) Stream(ctx context.Context, req client.Request, opts ...cli
 	ch := make(chan response, callOpts.Retries)
 	var grr error
 
-	for i := 0; i < callOpts.Retries; i++ {
+	for i := 0; i <= callOpts.Retries; i++ {
 		go func() {
 			s, err := call(i)
 			ch <- response{s, err}

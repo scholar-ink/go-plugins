@@ -7,7 +7,7 @@ package rabbitmq
 import (
 	"errors"
 
-	"github.com/nu7hatch/gouuid"
+	"github.com/google/uuid"
 	"github.com/streadway/amqp"
 )
 
@@ -18,7 +18,7 @@ type rabbitMQChannel struct {
 }
 
 func newRabbitChannel(conn *amqp.Connection) (*rabbitMQChannel, error) {
-	id, err := uuid.NewV4()
+	id, err := uuid.NewRandom()
 	if err != nil {
 		return nil, err
 	}

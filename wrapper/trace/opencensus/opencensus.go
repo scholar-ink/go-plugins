@@ -116,13 +116,13 @@ func NewHandlerWrapper() server.HandlerWrapper {
 			if spanCtx != nil {
 				ctx, t.span = trace.StartSpanWithRemoteParent(
 					ctx,
-					fmt.Sprintf("rpc/%s/%s/%s", ServerProfile.Role, req.Service(), req.Method()),
+					fmt.Sprintf("rpc/%s/%s/%s", ServerProfile.Role, req.Service(), req.Endpoint()),
 					*spanCtx,
 				)
 			} else {
 				ctx, t.span = trace.StartSpan(
 					ctx,
-					fmt.Sprintf("rpc/%s/%s/%s", ServerProfile.Role, req.Service(), req.Method()),
+					fmt.Sprintf("rpc/%s/%s/%s", ServerProfile.Role, req.Service(), req.Endpoint()),
 				)
 			}
 

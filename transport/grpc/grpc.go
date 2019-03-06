@@ -12,8 +12,8 @@ import (
 	mnet "github.com/micro/util/go/lib/net"
 	mls "github.com/micro/util/go/lib/tls"
 
-	"github.com/micro/grpc-go"
-	"github.com/micro/grpc-go/credentials"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 
 	pb "github.com/micro/go-plugins/transport/grpc/proto"
 )
@@ -84,7 +84,7 @@ func (t *grpcTransportListener) Accept(fn func(transport.Socket)) error {
 	srv := grpc.NewServer(opts...)
 
 	// register service
-	pb.RegisterTransportServer(srv, &microTransport{fn: fn})
+	pb.RegisterTransportServer(srv, &microTransport{addr: t.listener.Addr().String(), fn: fn})
 
 	// start serving
 	return srv.Serve(t.listener)
@@ -132,6 +132,8 @@ func (t *grpcTransport) Dial(addr string, opts ...transport.DialOption) (transpo
 	return &grpcTransportClient{
 		conn:   conn,
 		stream: stream,
+		local:  "localhost",
+		remote: addr,
 	}, nil
 }
 
@@ -153,6 +155,17 @@ func (t *grpcTransport) Listen(addr string, opts ...transport.ListenOption) (tra
 		tls:      t.opts.TLSConfig,
 		secure:   t.opts.Secure,
 	}, nil
+}
+
+func (t *grpcTransport) Init(opts ...transport.Option) error {
+	for _, o := range opts {
+		o(&t.opts)
+	}
+	return nil
+}
+
+func (t *grpcTransport) Options() transport.Options {
+	return t.opts
 }
 
 func (t *grpcTransport) String() string {

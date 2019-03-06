@@ -163,7 +163,7 @@ func (zw *zookeeperWatcher) watch() {
 
 	//watch every service
 	for _, service := range services {
-		sPath := servicePath(service)
+		sPath := childPath(watchPath, service)
 		go zw.watchDir(sPath, respChan)
 		children, _, err := zw.client.Children(sPath)
 		if err != nil {

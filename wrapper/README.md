@@ -50,7 +50,7 @@ type logWrapper struct {
 
 func (l *logWrapper) Call(ctx context.Context, req client.Request, rsp interface{}, opts ...client.CallOption) error {
 	md, _ := metadata.FromContext(ctx)
-	fmt.Printf("[Log Wrapper] ctx: %v service: %s method: %s\n", md, req.Service(), req.Method())
+	fmt.Printf("[Log Wrapper] ctx: %v service: %s method: %s\n", md, req.Service(), req.Endpoint())
 	return l.Client.Call(ctx, req, rsp)
 }
 
@@ -67,7 +67,7 @@ Here's a basic log wrapper for the handler
 ```go
 func NewLogWrapper(fn server.HandlerFunc) server.HandlerFunc {
 	return func(ctx context.Context, req server.Request, rsp interface{}) error {
-		log.Printf("[Log Wrapper] Before serving request method: %v", req.Method())
+		log.Printf("[Log Wrapper] Before serving request method: %v", req.Endpoint())
 		err := fn(ctx, req, rsp)
 		log.Printf("[Log Wrapper] After serving request")
 		return err

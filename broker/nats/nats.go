@@ -3,15 +3,18 @@ package nats
 
 import (
 	"context"
+	"errors"
 	"strings"
+	"sync"
 
 	"github.com/micro/go-micro/broker"
-	"github.com/micro/go-micro/broker/codec/json"
 	"github.com/micro/go-micro/cmd"
-	"github.com/nats-io/go-nats"
+	"github.com/micro/go-micro/codec/json"
+	nats "github.com/nats-io/go-nats"
 )
 
 type nbroker struct {
+	sync.RWMutex
 	addrs []string
 	conn  *nats.Conn
 	opts  broker.Options
@@ -85,9 +88,12 @@ func setAddrs(addrs []string) []string {
 }
 
 func (n *nbroker) Connect() error {
-	if n.conn != nil {
+	n.RLock()
+	if n.conn != nil && n.conn.IsConnected() {
+		n.RUnlock()
 		return nil
 	}
+	n.RUnlock()
 
 	opts := n.nopts
 	opts.Servers = n.addrs
@@ -103,12 +109,16 @@ func (n *nbroker) Connect() error {
 	if err != nil {
 		return err
 	}
+	n.Lock()
 	n.conn = c
+	n.Unlock()
 	return nil
 }
 
 func (n *nbroker) Disconnect() error {
+	n.RLock()
 	n.conn.Close()
+	n.RUnlock()
 	return nil
 }
 
@@ -129,10 +139,16 @@ func (n *nbroker) Publish(topic string, msg *broker.Message, opts ...broker.Publ
 	if err != nil {
 		return err
 	}
+	n.RLock()
+	defer n.RUnlock()
 	return n.conn.Publish(topic, b)
 }
 
 func (n *nbroker) Subscribe(topic string, handler broker.Handler, opts ...broker.SubscribeOption) (broker.Subscriber, error) {
+	if n.conn == nil {
+		return nil, errors.New("not connected")
+	}
+
 	opt := broker.SubscribeOptions{
 		AutoAck: true,
 	}
@@ -152,11 +168,13 @@ func (n *nbroker) Subscribe(topic string, handler broker.Handler, opts ...broker
 	var sub *nats.Subscription
 	var err error
 
+	n.RLock()
 	if len(opt.Queue) > 0 {
 		sub, err = n.conn.QueueSubscribe(topic, opt.Queue, fn)
 	} else {
 		sub, err = n.conn.Subscribe(topic, fn)
 	}
+	n.RUnlock()
 	if err != nil {
 		return nil, err
 	}
@@ -170,7 +188,7 @@ func (n *nbroker) String() string {
 func NewBroker(opts ...broker.Option) broker.Broker {
 	options := broker.Options{
 		// Default codec
-		Codec:   json.NewCodec(),
+		Codec:   json.Marshaler{},
 		Context: context.Background(),
 	}
 

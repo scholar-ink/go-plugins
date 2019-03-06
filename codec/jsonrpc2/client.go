@@ -6,6 +6,7 @@ import (
 	"io"
 	"math"
 	"reflect"
+	"strconv"
 	"sync"
 
 	"github.com/micro/go-micro/codec"
@@ -25,8 +26,8 @@ type clientCodec struct {
 	// Package rpc expects both.
 	// We save the request method in pending when sending a request
 	// and then look it up by request ID when filling out the rpc Response.
-	mutex   sync.Mutex        // protects pending
-	pending map[uint64]string // map request id to method name
+	mutex   sync.Mutex             // protects pending
+	pending map[interface{}]string // map request id to method name
 }
 
 func newClientCodec(conn io.ReadWriteCloser) *clientCodec {
@@ -34,7 +35,7 @@ func newClientCodec(conn io.ReadWriteCloser) *clientCodec {
 		dec:     json.NewDecoder(conn),
 		enc:     json.NewEncoder(conn),
 		c:       conn,
-		pending: make(map[uint64]string),
+		pending: make(map[interface{}]string),
 	}
 }
 
@@ -42,7 +43,7 @@ type clientRequest struct {
 	Version string      `json:"jsonrpc"`
 	Method  string      `json:"method"`
 	Params  interface{} `json:"params,omitempty"`
-	ID      *uint64     `json:"id,omitempty"`
+	ID      interface{} `json:"id,omitempty"`
 }
 
 func (c *clientCodec) Write(m *codec.Message, b interface{}) error {
@@ -84,14 +85,18 @@ func (c *clientCodec) Write(m *codec.Message, b interface{}) error {
 	}
 
 	var req clientRequest
-	if m.Id != seqNotify {
+
+	i, _ := strconv.ParseInt(m.Id, 10, 64)
+
+	if uint64(i) != seqNotify {
 		c.mutex.Lock()
-		c.pending[m.Id] = m.Method
+		c.pending[m.Id] = m.Endpoint
 		c.mutex.Unlock()
-		req.ID = &m.Id
+		req.ID = m.Id
 	}
+
 	req.Version = "2.0"
-	req.Method = m.Method
+	req.Method = m.Endpoint
 	req.Params = b
 	if err := c.enc.Encode(&req); err != nil {
 		return NewError(errInternal.Code, err.Error())
@@ -101,7 +106,7 @@ func (c *clientCodec) Write(m *codec.Message, b interface{}) error {
 
 type clientResponse struct {
 	Version string           `json:"jsonrpc"`
-	ID      *uint64          `json:"id"`
+	ID      interface{}      `json:"id"`
 	Result  *json.RawMessage `json:"result,omitempty"`
 	Error   *Error           `json:"error,omitempty"`
 }
@@ -177,12 +182,12 @@ func (c *clientCodec) ReadHeader(m *codec.Message) error {
 	}
 
 	c.mutex.Lock()
-	m.Method = c.pending[*c.resp.ID]
-	delete(c.pending, *c.resp.ID)
+	m.Endpoint = c.pending[c.resp.ID]
+	delete(c.pending, c.resp.ID)
 	c.mutex.Unlock()
 
 	m.Error = ""
-	m.Id = *c.resp.ID
+	m.Id = c.resp.ID.(string)
 	if c.resp.Error != nil {
 		m.Error = c.resp.Error.Error()
 	}

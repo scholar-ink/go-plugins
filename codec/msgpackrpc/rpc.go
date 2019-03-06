@@ -40,7 +40,7 @@ func decodeBody(r *msgp.Reader, v interface{}) error {
 // Request is what the client can construct to be sent to the server.
 // The params represents the body of the request.
 type Request struct {
-	ID     uint32
+	ID     string
 	Method string
 	Body   interface{}
 
@@ -70,7 +70,7 @@ func (r *Request) EncodeMsg(w *msgp.Writer) error {
 		return err
 	}
 
-	if err = w.WriteUint32(r.ID); err != nil {
+	if err = w.WriteString(r.ID); err != nil {
 		return err
 	}
 
@@ -114,7 +114,7 @@ func (r *Request) DecodeMsg(mr *msgp.Reader) error {
 		return ErrBadMessageType
 	}
 
-	id, err := mr.ReadUint32()
+	id, err := mr.ReadString()
 	if err != nil {
 		return err
 	}
@@ -152,7 +152,7 @@ func (r *Request) DecodeMsg(mr *msgp.Reader) error {
 }
 
 type Response struct {
-	ID    uint32
+	ID    string
 	Error string
 	Body  interface{}
 
@@ -180,7 +180,7 @@ func (r *Response) EncodeMsg(w *msgp.Writer) error {
 		return err
 	}
 
-	if err = w.WriteUint32(r.ID); err != nil {
+	if err = w.WriteString(r.ID); err != nil {
 		return err
 	}
 
@@ -226,7 +226,7 @@ func (r *Response) DecodeMsg(mr *msgp.Reader) error {
 		return ErrBadMessageType
 	}
 
-	id, err := mr.ReadUint32()
+	id, err := mr.ReadString()
 	if err != nil {
 		return err
 	}

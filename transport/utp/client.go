@@ -6,6 +6,14 @@ import (
 	"github.com/micro/go-micro/transport"
 )
 
+func (u *utpClient) Local() string {
+	return u.conn.LocalAddr().String()
+}
+
+func (u *utpClient) Remote() string {
+	return u.conn.RemoteAddr().String()
+}
+
 func (u *utpClient) Send(m *transport.Message) error {
 	// set timeout if its greater than 0
 	if u.timeout > time.Duration(0) {

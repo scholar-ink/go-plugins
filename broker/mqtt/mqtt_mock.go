@@ -49,6 +49,10 @@ func newMockMessage(topic string, qos byte, retained bool, payload interface{}) 
 	}
 }
 
+func (m *mockMessage) Ack() {
+	return
+}
+
 func (m *mockMessage) Duplicate() bool {
 	return false
 }
@@ -78,6 +82,12 @@ func (m *mockClient) AddRoute(topic string, h mqtt.MessageHandler) {
 }
 
 func (m *mockClient) IsConnected() bool {
+	m.Lock()
+	defer m.Unlock()
+	return m.connected
+}
+
+func (m *mockClient) IsConnectionOpen() bool {
 	m.Lock()
 	defer m.Unlock()
 	return m.connected

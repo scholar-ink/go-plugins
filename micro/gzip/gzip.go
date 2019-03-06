@@ -59,10 +59,15 @@ func (g *gzipper) String() string {
 	return "gzip"
 }
 
+func (w gzipWriter) WriteHeader(code int) {
+	w.Header().Del("Content-Length")
+	w.ResponseWriter.WriteHeader(code)
+}
+
 func (w gzipWriter) Write(b []byte) (int, error) {
 	return w.Writer.Write(b)
 }
 
-func New() plugin.Plugin {
+func NewPlugin() plugin.Plugin {
 	return new(gzipper)
 }

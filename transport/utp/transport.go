@@ -106,6 +106,17 @@ func (u *utpTransport) Listen(addr string, opts ...transport.ListenOption) (tran
 	}, nil
 }
 
+func (u *utpTransport) Init(opts ...transport.Option) error {
+	for _, o := range opts {
+		o(&u.opts)
+	}
+	return nil
+}
+
+func (u *utpTransport) Options() transport.Options {
+	return u.opts
+}
+
 func (u *utpTransport) String() string {
 	return "utp"
 }

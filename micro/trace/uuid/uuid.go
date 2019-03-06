@@ -4,9 +4,9 @@ package uuid
 import (
 	"net/http"
 
+	"github.com/google/uuid"
 	"github.com/micro/cli"
 	"github.com/micro/micro/plugin"
-	"github.com/pborman/uuid"
 )
 
 type uuidPlugin struct{}
@@ -23,7 +23,7 @@ func (u *uuidPlugin) Handler() plugin.Handler {
 	return func(h http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if td := r.Header.Get("X-Micro-Trace-Id"); len(td) == 0 {
-				r.Header.Set("X-Micro-Trace-Id", uuid.NewUUID().String())
+				r.Header.Set("X-Micro-Trace-Id", uuid.New().String())
 			}
 			h.ServeHTTP(w, r)
 		})

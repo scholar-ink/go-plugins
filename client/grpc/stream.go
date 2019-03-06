@@ -6,7 +6,7 @@ import (
 	"sync"
 
 	"github.com/micro/go-micro/client"
-	"github.com/micro/grpc-go"
+	"google.golang.org/grpc"
 )
 
 // Implements the streamer interface
@@ -25,6 +25,10 @@ func (g *grpcStream) Context() context.Context {
 
 func (g *grpcStream) Request() client.Request {
 	return g.request
+}
+
+func (g *grpcStream) Response() client.Response {
+	return nil
 }
 
 func (g *grpcStream) Send(msg interface{}) error {

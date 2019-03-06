@@ -101,6 +101,10 @@ func (w *whitelist) String() string {
 	return "ip_whitelist"
 }
 
+func NewPlugin() plugin.Plugin {
+	return NewIPWhitelist()
+}
+
 func NewIPWhitelist(ips ...string) plugin.Plugin {
 	// create plugin
 	w := &whitelist{

@@ -30,7 +30,7 @@ var (
 	Service, _ = tag.NewKey("rpc.service")
 
 	// Method is the service method called.
-	Method, _ = tag.NewKey("rpc.method")
+	Endpoint, _ = tag.NewKey("rpc.endpoint")
 )
 
 // Default distributions used by views in this package.
@@ -58,7 +58,7 @@ var (
 	ClientRequestCountByMethod = &view.View{
 		Name:        "opencensus.io/rpc/client/request_count_by_method",
 		Description: "Client request count by RPC method",
-		TagKeys:     []tag.Key{Method},
+		TagKeys:     []tag.Key{Endpoint},
 		Measure:     ClientRequestCount,
 		Aggregation: view.Count(),
 	}
@@ -88,7 +88,7 @@ var (
 	ServerRequestCountByMethod = &view.View{
 		Name:        "opencensus.io/rpc/server/request_count_by_method",
 		Description: "Server request count by RPC method",
-		TagKeys:     []tag.Key{Method},
+		TagKeys:     []tag.Key{Endpoint},
 		Measure:     ServerRequestCount,
 		Aggregation: view.Count(),
 	}

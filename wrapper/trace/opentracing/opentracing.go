@@ -5,10 +5,12 @@ import (
 	"fmt"
 
 	"context"
+
 	"github.com/micro/go-micro/client"
 	"github.com/micro/go-micro/metadata"
+	"github.com/micro/go-micro/registry"
 	"github.com/micro/go-micro/server"
-	"github.com/opentracing/opentracing-go"
+	opentracing "github.com/opentracing/opentracing-go"
 )
 
 type otWrapper struct {
@@ -37,7 +39,7 @@ func traceIntoContext(ctx context.Context, tracer opentracing.Tracer, name strin
 }
 
 func (o *otWrapper) Call(ctx context.Context, req client.Request, rsp interface{}, opts ...client.CallOption) error {
-	name := fmt.Sprintf("%s.%s", req.Service(), req.Method())
+	name := fmt.Sprintf("%s.%s", req.Service(), req.Endpoint())
 	ctx, span, err := traceIntoContext(ctx, o.ot, name)
 	if err != nil {
 		return err
@@ -66,14 +68,14 @@ func NewClientWrapper(ot opentracing.Tracer) client.Wrapper {
 // NewHandlerWrapper accepts an opentracing Tracer and returns a Call Wrapper
 func NewCallWrapper(ot opentracing.Tracer) client.CallWrapper {
 	return func(cf client.CallFunc) client.CallFunc {
-		return func(ctx context.Context, addr string, req client.Request, rsp interface{}, opts client.CallOptions) error {
-			name := fmt.Sprintf("%s.%s", req.Service(), req.Method())
+		return func(ctx context.Context, node *registry.Node, req client.Request, rsp interface{}, opts client.CallOptions) error {
+			name := fmt.Sprintf("%s.%s", req.Service(), req.Endpoint())
 			ctx, span, err := traceIntoContext(ctx, ot, name)
 			if err != nil {
 				return err
 			}
 			defer span.Finish()
-			return cf(ctx, addr, req, rsp, opts)
+			return cf(ctx, node, req, rsp, opts)
 		}
 	}
 }
@@ -82,7 +84,7 @@ func NewCallWrapper(ot opentracing.Tracer) client.CallWrapper {
 func NewHandlerWrapper(ot opentracing.Tracer) server.HandlerWrapper {
 	return func(h server.HandlerFunc) server.HandlerFunc {
 		return func(ctx context.Context, req server.Request, rsp interface{}) error {
-			name := fmt.Sprintf("%s.%s", req.Service(), req.Method())
+			name := fmt.Sprintf("%s.%s", req.Service(), req.Endpoint())
 			ctx, span, err := traceIntoContext(ctx, ot, name)
 			if err != nil {
 				return err

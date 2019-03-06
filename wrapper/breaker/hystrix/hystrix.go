@@ -12,7 +12,7 @@ type clientWrapper struct {
 }
 
 func (c *clientWrapper) Call(ctx context.Context, req client.Request, rsp interface{}, opts ...client.CallOption) error {
-	return hystrix.Do(req.Service()+"."+req.Method(), func() error {
+	return hystrix.Do(req.Service()+"."+req.Endpoint(), func() error {
 		return c.Client.Call(ctx, req, rsp, opts...)
 	}, nil)
 }

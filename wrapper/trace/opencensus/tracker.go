@@ -23,7 +23,7 @@ type tracker struct {
 
 type requestDescriptor interface {
 	Service() string
-	Method() string
+	Endpoint() string
 }
 
 type publicationDescriptor interface {
@@ -34,7 +34,7 @@ type publicationDescriptor interface {
 func newRequestTracker(req requestDescriptor, profile *StatsProfile) *tracker {
 	return &tracker{
 		profile: profile,
-		method:  req.Method(),
+		method:  req.Endpoint(),
 		service: req.Service(),
 	}
 }
@@ -53,7 +53,7 @@ func newPublicationTracker(pub publicationDescriptor, profile *StatsProfile) *tr
 func (t *tracker) start(ctx context.Context, startSpan bool) context.Context {
 	t.startedAt = time.Now()
 
-	ctx, _ = tag.New(ctx, tag.Upsert(Service, t.service), tag.Upsert(Method, t.method))
+	ctx, _ = tag.New(ctx, tag.Upsert(Service, t.service), tag.Upsert(Endpoint, t.method))
 	stats.Record(ctx, t.profile.CountMeasure.M(1))
 
 	if startSpan {

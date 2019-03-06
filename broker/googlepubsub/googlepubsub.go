@@ -6,9 +6,9 @@ import (
 	"time"
 
 	"cloud.google.com/go/pubsub"
+	"github.com/google/uuid"
 	"github.com/micro/go-micro/broker"
 	"github.com/micro/go-micro/cmd"
-	"github.com/pborman/uuid"
 	"google.golang.org/api/option"
 )
 
@@ -97,7 +97,10 @@ func (s *subscriber) Unsubscribe() error {
 		return nil
 	default:
 		close(s.exit)
-		return s.sub.Delete(context.Background())
+		if deleteSubscription, ok := s.options.Context.Value(deleteSubscription{}).(bool); !ok || deleteSubscription {
+			return s.sub.Delete(context.Background())
+		}
+		return nil
 	}
 }
 
@@ -154,7 +157,7 @@ func (b *pubsubBroker) Publish(topic string, msg *broker.Message, opts ...broker
 	}
 
 	m := &pubsub.Message{
-		ID:         "m-" + uuid.NewUUID().String(),
+		ID:         "m-" + uuid.New().String(),
 		Data:       msg.Body,
 		Attributes: msg.Header,
 	}
@@ -168,7 +171,8 @@ func (b *pubsubBroker) Publish(topic string, msg *broker.Message, opts ...broker
 func (b *pubsubBroker) Subscribe(topic string, h broker.Handler, opts ...broker.SubscribeOption) (broker.Subscriber, error) {
 	options := broker.SubscribeOptions{
 		AutoAck: true,
-		Queue:   "q-" + uuid.NewUUID().String(),
+		Queue:   "q-" + uuid.New().String(),
+		Context: b.options.Context,
 	}
 
 	for _, o := range opts {
@@ -177,21 +181,24 @@ func (b *pubsubBroker) Subscribe(topic string, h broker.Handler, opts ...broker.
 
 	ctx := context.Background()
 	sub := b.client.Subscription(options.Queue)
-	exists, err := sub.Exists(ctx)
-	if err != nil {
-		return nil, err
-	}
 
-	if !exists {
-		tt := b.client.Topic(topic)
-		subb, err := b.client.CreateSubscription(ctx, options.Queue, pubsub.SubscriptionConfig{
-			Topic:       tt,
-			AckDeadline: time.Duration(0),
-		})
+	if createSubscription, ok := b.options.Context.Value(createSubscription{}).(bool); !ok || createSubscription {
+		exists, err := sub.Exists(ctx)
 		if err != nil {
 			return nil, err
 		}
-		sub = subb
+
+		if !exists {
+			tt := b.client.Topic(topic)
+			subb, err := b.client.CreateSubscription(ctx, options.Queue, pubsub.SubscriptionConfig{
+				Topic:       tt,
+				AckDeadline: time.Duration(0),
+			})
+			if err != nil {
+				return nil, err
+			}
+			sub = subb
+		}
 	}
 
 	subscriber := &subscriber{

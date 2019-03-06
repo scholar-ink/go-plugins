@@ -24,8 +24,8 @@ import (
 	"github.com/eclipse/paho.mqtt.golang"
 	"github.com/micro/go-log"
 	"github.com/micro/go-micro/broker"
-	"github.com/micro/go-micro/broker/codec/json"
 	"github.com/micro/go-micro/cmd"
+	"github.com/micro/go-micro/codec/json"
 )
 
 type mqttBroker struct {
@@ -133,7 +133,7 @@ func newClient(addrs []string, opts broker.Options) mqtt.Client {
 func newBroker(opts ...broker.Option) broker.Broker {
 	options := broker.Options{
 		// Default codec
-		Codec: json.NewCodec(),
+		Codec: json.Marshaler{},
 	}
 
 	for _, o := range opts {

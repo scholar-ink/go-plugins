@@ -16,7 +16,7 @@ type clientWrapper struct {
 
 func (c *clientWrapper) Call(ctx context.Context, req client.Request, rsp interface{}, opts ...client.CallOption) error {
 	// execute client wrapper?
-	if !c.endpoints[req.Method()] {
+	if !c.endpoints[req.Endpoint()] {
 		// no
 		return c.Client.Call(ctx, req, rsp, opts...)
 	}
@@ -49,7 +49,7 @@ func NewHandlerWrapper(hw server.HandlerWrapper, eps ...string) server.HandlerWr
 	return func(h server.HandlerFunc) server.HandlerFunc {
 		return func(ctx context.Context, req server.Request, rsp interface{}) error {
 			// execute the handler wrapper?
-			if !endpoints[req.Method()] {
+			if !endpoints[req.Endpoint()] {
 				// no
 				return h(ctx, req, rsp)
 			}

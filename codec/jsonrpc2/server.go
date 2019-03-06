@@ -27,7 +27,7 @@ type serverCodec struct {
 	// the response to find the original request ID.
 	mutex   sync.Mutex // protects seq, pending
 	seq     uint64
-	pending map[uint64]*json.RawMessage
+	pending map[interface{}]*json.RawMessage
 }
 
 func newServerCodec(conn io.ReadWriteCloser) *serverCodec {
@@ -35,7 +35,7 @@ func newServerCodec(conn io.ReadWriteCloser) *serverCodec {
 		dec:     json.NewDecoder(conn),
 		enc:     json.NewEncoder(conn),
 		c:       conn,
-		pending: make(map[uint64]*json.RawMessage),
+		pending: make(map[interface{}]*json.RawMessage),
 	}
 }
 
@@ -130,7 +130,7 @@ func (c *serverCodec) ReadHeader(m *codec.Message) (err error) {
 		return err
 	}
 
-	m.Method = c.req.Method
+	m.Endpoint = c.req.Method
 
 	// JSON request id can be any JSON value;
 	// RPC package expects uint64.  Translate to
@@ -139,7 +139,7 @@ func (c *serverCodec) ReadHeader(m *codec.Message) (err error) {
 	c.seq++
 	c.pending[c.seq] = c.req.ID
 	c.req.ID = nil
-	m.Id = c.seq
+	m.Id = fmt.Sprintf("%d", c.seq)
 	c.mutex.Unlock()
 
 	return nil
@@ -176,7 +176,7 @@ func (c *serverCodec) Write(m *codec.Message, x interface{}) error {
 	}
 	c.mutex.Unlock()
 
-	if replies, ok := x.(*[]*json.RawMessage); m.Method == "JSONRPC2.Batch" && ok {
+	if replies, ok := x.(*[]*json.RawMessage); m.Endpoint == "JSONRPC2.Batch" && ok {
 		if len(*replies) == 0 {
 			return nil
 		}

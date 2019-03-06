@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/micro/go-micro/registry"
-	"github.com/micro/go-micro/registry/mock"
+	"github.com/micro/go-micro/registry/memory"
 	"github.com/micro/go-micro/selector"
 )
 
@@ -77,7 +77,7 @@ func TestPrioritiseFunc(t *testing.T) {
 func TestLabelSelector(t *testing.T) {
 	counts := map[string]int{}
 
-	r := mock.NewRegistry()
+	r := memory.NewRegistry()
 	r.Register(&registry.Service{
 		Name:    "bar",
 		Version: "latest",

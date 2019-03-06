@@ -11,12 +11,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/coreos/etcd/clientv3"
 	"github.com/micro/go-micro/cmd"
 	"github.com/micro/go-micro/registry"
+	"go.etcd.io/etcd/clientv3"
 
-	"github.com/coreos/etcd/etcdserver/api/v3rpc/rpctypes"
 	hash "github.com/mitchellh/hashstructure"
+	"go.etcd.io/etcd/etcdserver/api/v3rpc/rpctypes"
 )
 
 var (
@@ -33,6 +33,60 @@ type etcdv3Registry struct {
 
 func init() {
 	cmd.DefaultRegistries["etcdv3"] = NewRegistry
+}
+
+func configure(e *etcdv3Registry, opts ...registry.Option) error {
+	config := clientv3.Config{
+		Endpoints: []string{"127.0.0.1:2379"},
+	}
+
+	for _, o := range opts {
+		o(&e.options)
+	}
+
+	if e.options.Timeout == 0 {
+		e.options.Timeout = 5 * time.Second
+	}
+
+	if e.options.Secure || e.options.TLSConfig != nil {
+		tlsConfig := e.options.TLSConfig
+		if tlsConfig == nil {
+			tlsConfig = &tls.Config{
+				InsecureSkipVerify: true,
+			}
+		}
+
+		config.TLS = tlsConfig
+	}
+
+	if e.options.Context != nil {
+		u, ok := e.options.Context.Value(authKey{}).(*authCreds)
+		if ok {
+			config.Username = u.Username
+			config.Password = u.Password
+		}
+	}
+
+	var cAddrs []string
+
+	for _, addr := range e.options.Addrs {
+		if len(addr) == 0 {
+			continue
+		}
+		cAddrs = append(cAddrs, addr)
+	}
+
+	// if we got addrs then we'll update
+	if len(cAddrs) > 0 {
+		config.Endpoints = cAddrs
+	}
+
+	cli, err := clientv3.New(config)
+	if err != nil {
+		return err
+	}
+	e.client = cli
+	return nil
 }
 
 func encode(s *registry.Service) string {
@@ -54,6 +108,10 @@ func nodePath(s, id string) string {
 
 func servicePath(s string) string {
 	return path.Join(prefix, strings.Replace(s, "/", "-", -1))
+}
+
+func (e *etcdv3Registry) Init(opts ...registry.Option) error {
+	return configure(e, opts...)
 }
 
 func (e *etcdv3Registry) Options() registry.Options {
@@ -246,51 +304,11 @@ func (e *etcdv3Registry) String() string {
 }
 
 func NewRegistry(opts ...registry.Option) registry.Registry {
-	config := clientv3.Config{
-		Endpoints: []string{"127.0.0.1:2379"},
-	}
-
-	var options registry.Options
-	for _, o := range opts {
-		o(&options)
-	}
-
-	if options.Timeout == 0 {
-		options.Timeout = 5 * time.Second
-	}
-
-	if options.Secure || options.TLSConfig != nil {
-		tlsConfig := options.TLSConfig
-		if tlsConfig == nil {
-			tlsConfig = &tls.Config{
-				InsecureSkipVerify: true,
-			}
-		}
-
-		config.TLS = tlsConfig
-	}
-
-	var cAddrs []string
-
-	for _, addr := range options.Addrs {
-		if len(addr) == 0 {
-			continue
-		}
-		cAddrs = append(cAddrs, addr)
-	}
-
-	// if we got addrs then we'll update
-	if len(cAddrs) > 0 {
-		config.Endpoints = cAddrs
-	}
-
-	cli, _ := clientv3.New(config)
 	e := &etcdv3Registry{
-		client:   cli,
-		options:  options,
+		options:  registry.Options{},
 		register: make(map[string]uint64),
 		leases:   make(map[string]clientv3.LeaseID),
 	}
-
+	configure(e, opts...)
 	return e
 }

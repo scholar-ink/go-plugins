@@ -5,17 +5,15 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
-	"io"
 	"net"
 	"reflect"
-	"runtime/debug"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/micro/go-log"
+	log "github.com/micro/go-log"
 	"github.com/micro/go-micro/broker"
 	"github.com/micro/go-micro/cmd"
 	"github.com/micro/go-micro/codec"
@@ -26,21 +24,27 @@ import (
 	"github.com/micro/util/go/lib/addr"
 	mgrpc "github.com/micro/util/go/lib/grpc"
 
-	"github.com/micro/grpc-go"
-	"github.com/micro/grpc-go/codes"
-	"github.com/micro/grpc-go/credentials"
-	"github.com/micro/grpc-go/metadata"
-	"github.com/micro/grpc-go/status"
-	"github.com/micro/grpc-go/transport"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/encoding"
+	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
+)
+
+var (
+	// DefaultMaxMsgSize define maximum message size that server can send
+	// or receive.  Default value is 4MB.
+	DefaultMaxMsgSize = 1024 * 1024 * 4
 )
 
 const (
-	defaultMaxMsgSize  = 1024 * 1024 * 4 // use 4MB as the default message size limit
 	defaultContentType = "application/grpc"
 )
 
 type grpcServer struct {
 	rpc  *rServer
+	srv  *grpc.Server
 	exit chan chan error
 	wg   sync.WaitGroup
 
@@ -53,13 +57,17 @@ type grpcServer struct {
 }
 
 func init() {
+	encoding.RegisterCodec(jsonCodec{})
+	encoding.RegisterCodec(bytesCodec{})
+
 	cmd.DefaultServers["grpc"] = NewServer
 }
 
 func newGRPCServer(opts ...server.Option) server.Server {
 	options := newOptions(opts...)
 
-	return &grpcServer{
+	// create a grpc server
+	srv := &grpcServer{
 		opts: options,
 		rpc: &rServer{
 			serviceMap: make(map[string]*service),
@@ -68,6 +76,51 @@ func newGRPCServer(opts ...server.Option) server.Server {
 		subscribers: make(map[*subscriber][]broker.Subscriber),
 		exit:        make(chan chan error),
 	}
+
+	// configure the grpc server
+	srv.configure()
+
+	return srv
+}
+
+func (g *grpcServer) configure(opts ...server.Option) {
+	// Don't reprocess where there's no config
+	if len(opts) == 0 && g.srv != nil {
+		return
+	}
+
+	for _, o := range opts {
+		o(&g.opts)
+	}
+
+	maxMsgSize := g.getMaxMsgSize()
+
+	gopts := []grpc.ServerOption{
+		grpc.MaxRecvMsgSize(maxMsgSize),
+		grpc.MaxSendMsgSize(maxMsgSize),
+		grpc.UnknownServiceHandler(g.handler),
+	}
+
+	if creds := g.getCredentials(); creds != nil {
+		gopts = append(gopts, grpc.Creds(creds))
+	}
+
+	if opts := g.getGrpcOptions(); opts != nil {
+		gopts = append(gopts, opts...)
+	}
+
+	g.srv = grpc.NewServer(gopts...)
+}
+
+func (g *grpcServer) getMaxMsgSize() int {
+	if g.opts.Context == nil {
+		return DefaultMaxMsgSize
+	}
+	s, ok := g.opts.Context.Value(maxMsgSizeKey{}).(int)
+	if !ok {
+		return DefaultMaxMsgSize
+	}
+	return s
 }
 
 func (g *grpcServer) getCredentials() credentials.TransportCredentials {
@@ -80,120 +133,51 @@ func (g *grpcServer) getCredentials() credentials.TransportCredentials {
 	return nil
 }
 
-func (g *grpcServer) getHttp2TransportConfig() transport.ServerConfig {
-	if g.opts.Context != nil {
-		if v := g.opts.Context.Value(transportConfig{}); v != nil {
-			return *v.(*transport.ServerConfig)
-		}
+func (g *grpcServer) getGrpcOptions() []grpc.ServerOption {
+	if g.opts.Context == nil {
+		return nil
 	}
-	return transport.ServerConfig{}
+
+	v := g.opts.Context.Value(grpcOptions{})
+
+	if v == nil {
+		return nil
+	}
+
+	opts, ok := v.([]grpc.ServerOption)
+
+	if !ok {
+		return nil
+	}
+
+	return opts
 }
 
-func (g *grpcServer) serve(l net.Listener) error {
-	defer l.Close()
+func (g *grpcServer) handler(srv interface{}, stream grpc.ServerStream) error {
+	g.wg.Add(1)
+	defer g.wg.Done()
 
-	var tempDelay time.Duration
-
-	for {
-		conn, err := l.Accept()
-		if err != nil {
-			if ne, ok := err.(interface {
-				Temporary() bool
-			}); ok && ne.Temporary() {
-				if tempDelay == 0 {
-					tempDelay = 5 * time.Millisecond
-				} else {
-					tempDelay *= 2
-				}
-				if max := 1 * time.Second; tempDelay > max {
-					tempDelay = max
-				}
-				select {
-				case <-time.After(tempDelay):
-				}
-				continue
-			}
-			return err
-		}
-		tempDelay = 0
-
-		go g.accept(conn)
+	fullMethod, ok := grpc.MethodFromServerStream(stream)
+	if !ok {
+		return grpc.Errorf(codes.Internal, "method does not exist in context")
 	}
-}
 
-func (g *grpcServer) useTransportAuthenticator(rawConn net.Conn) (net.Conn, credentials.AuthInfo, error) {
-	if creds := g.getCredentials(); creds != nil {
-		return creds.ServerHandshake(rawConn)
-	}
-	return rawConn, nil, nil
-}
-
-func (g *grpcServer) accept(rawConn net.Conn) {
-	conn, authInfo, err := g.useTransportAuthenticator(rawConn)
-
+	serviceName, methodName, err := mgrpc.ServiceMethod(fullMethod)
 	if err != nil {
-		rawConn.Close()
-		return
-	}
-
-	serverConfig := g.getHttp2TransportConfig()
-	serverConfig.AuthInfo = authInfo
-
-	st, err := transport.NewServerTransport("http2", conn, &serverConfig)
-	if err != nil {
-		conn.Close()
-		return
-	}
-	defer st.Close()
-
-	var wg sync.WaitGroup
-	st.HandleStreams(func(stream *transport.Stream) {
-		wg.Add(1)
-		g.wg.Add(1)
-		go func() {
-			defer func() {
-				wg.Done()
-				g.wg.Done()
-
-				if r := recover(); r != nil {
-					log.Log(r, string(debug.Stack()))
-				}
-			}()
-
-			g.serveStream(st, stream)
-		}()
-	}, func(ctx context.Context, method string) context.Context {
-		return ctx
-	})
-	wg.Wait()
-}
-
-func (g *grpcServer) serveStream(t transport.ServerTransport, stream *transport.Stream) {
-	// get Go method from stream method
-	serviceName, methodName, err := mgrpc.ServiceMethod(stream.Method())
-	if err != nil {
-		if gerr := t.WriteStatus(stream, status.New(codes.InvalidArgument, err.Error())); err != nil {
-			log.Logf("grpc: Server.serveStream failed to write status: %v", gerr)
-		}
-		return
+		return status.New(codes.InvalidArgument, err.Error()).Err()
 	}
 
 	g.rpc.mu.Lock()
 	service := g.rpc.serviceMap[serviceName]
 	g.rpc.mu.Unlock()
+
 	if service == nil {
-		if err := t.WriteStatus(stream, status.New(codes.Unimplemented, fmt.Sprintf("unknown service %v", service))); err != nil {
-			log.Logf("grpc: Server.serveStream failed to write status: %v", err)
-		}
-		return
+		return status.New(codes.Unimplemented, fmt.Sprintf("unknown service %v", service)).Err()
 	}
 
 	mtype := service.method[methodName]
 	if mtype == nil {
-		if err := t.WriteStatus(stream, status.New(codes.Unimplemented, fmt.Sprintf("unknown service %v", service))); err != nil {
-			log.Logf("grpc: Server.serveStream failed to write status: %v", err)
-		}
-		return
+		return status.New(codes.Unimplemented, fmt.Sprintf("unknown service %v", service)).Err()
 	}
 
 	// get grpc metadata
@@ -208,23 +192,14 @@ func (g *grpcServer) serveStream(t transport.ServerTransport, stream *transport.
 		md[k] = strings.Join(v, ", ")
 	}
 
+	// timeout for server deadline
+	to := md["timeout"]
+
 	// get content type
 	ct := defaultContentType
 	if ctype, ok := md["x-content-type"]; ok {
 		ct = ctype
 	}
-
-	// get codec
-	codec, err := g.newGRPCCodec(ct)
-	if err != nil {
-		if errr := t.WriteStatus(stream, status.New(codes.Internal, err.Error())); errr != nil {
-			log.Logf("grpc: Server.serveStream failed to write status: %v", errr)
-		}
-		return
-	}
-
-	// timeout for server deadline
-	to := md["timeout"]
 
 	delete(md, "x-content-type")
 	delete(md, "timeout")
@@ -241,77 +216,15 @@ func (g *grpcServer) serveStream(t transport.ServerTransport, stream *transport.
 
 	// process unary
 	if !mtype.stream {
-		g.processRequest(t, stream, service, mtype, codec, ct, ctx)
-		return
+		return g.processRequest(stream, service, mtype, ct, ctx)
 	}
 
-	// process strea
-	g.processStream(t, stream, service, mtype, codec, ct, ctx)
+	// process stream
+	return g.processStream(stream, service, mtype, ct, ctx)
 }
 
-func (g *grpcServer) sendResponse(t transport.ServerTransport, stream *transport.Stream, msg interface{}, codec grpc.Codec, opts *transport.Options) error {
-	hd, p, err := encode(codec, msg, nil, nil, nil)
-	if err != nil {
-		log.Fatalf("grpc: Server failed to encode response %v", err)
-	}
-	return t.Write(stream, hd, p, opts)
-}
-
-func (g *grpcServer) processRequest(t transport.ServerTransport, stream *transport.Stream, service *service, mtype *methodType, codec grpc.Codec, ct string, ctx context.Context) (err error) {
-	p := &parser{r: stream}
+func (g *grpcServer) processRequest(stream grpc.ServerStream, service *service, mtype *methodType, ct string, ctx context.Context) error {
 	for {
-		pf, req, err := p.recvMsg(defaultMaxMsgSize)
-		if err == io.EOF {
-			// The entire stream is done (for unary RPC only).
-			return err
-		}
-		if err == io.ErrUnexpectedEOF {
-			err = Errorf(codes.Internal, io.ErrUnexpectedEOF.Error())
-		}
-		if err != nil {
-			switch err := err.(type) {
-			case *rpcError:
-				if err := t.WriteStatus(stream, status.New(err.code, err.desc)); err != nil {
-					log.Logf("grpc: Server.processUnaryRPC failed to write status %v", err)
-				}
-			case transport.ConnectionError:
-				// Nothing to do here.
-			case transport.StreamError:
-				if err := t.WriteStatus(stream, status.New(err.Code, err.Desc)); err != nil {
-					log.Logf("grpc: Server.processUnaryRPC failed to write status %v", err)
-				}
-			default:
-				panic(fmt.Sprintf("grpc: Unexpected error (%T) from recvMsg: %v", err, err))
-			}
-			return err
-		}
-
-		if err := checkRecvPayload(pf, stream.RecvCompress(), nil); err != nil {
-			switch err := err.(type) {
-			case *rpcError:
-				if err := t.WriteStatus(stream, status.New(err.code, err.desc)); err != nil {
-					log.Logf("grpc: Server.processUnaryRPC failed to write status %v", err)
-				}
-			default:
-				if err := t.WriteStatus(stream, status.New(codes.Internal, err.Error())); err != nil {
-					log.Logf("grpc: Server.processUnaryRPC failed to write status %v", err)
-				}
-
-			}
-			return err
-		}
-
-		// status code/desc
-		statusCode := codes.OK
-		statusDesc := ""
-
-		// exceeds max message size, bail early
-		if len(req) > defaultMaxMsgSize {
-			statusCode = codes.Internal
-			statusDesc = fmt.Sprintf("grpc: server received a message of %d bytes exceeding %d limit", len(req), defaultMaxMsgSize)
-			return t.WriteStatus(stream, status.New(statusCode, statusDesc))
-		}
-
 		var argv, replyv reflect.Value
 
 		// Decode the argument value.
@@ -324,14 +237,8 @@ func (g *grpcServer) processRequest(t transport.ServerTransport, stream *transpo
 		}
 
 		// Unmarshal request
-		if err := codec.Unmarshal(req, argv.Interface()); err != nil {
-			statusCode = convertCode(err)
-			statusDesc = err.Error()
-			if err := t.WriteStatus(stream, status.New(statusCode, statusDesc)); err != nil {
-				log.Logf("grpc: Server.processUnaryRPC failed to write status: %v", err)
-				return err
-			}
-			return nil
+		if err := stream.RecvMsg(argv.Interface()); err != nil {
+			return err
 		}
 
 		if argIsValue {
@@ -344,17 +251,21 @@ func (g *grpcServer) processRequest(t transport.ServerTransport, stream *transpo
 		function := mtype.method.Func
 		var returnValues []reflect.Value
 
+		cc := defaultGRPCCodecs[ct]
+		b, _ := cc.Marshal(argv.Interface())
+
 		// create a client.Request
 		r := &rpcRequest{
 			service:     g.opts.Name,
 			contentType: ct,
 			method:      fmt.Sprintf("%s.%s", service.name, mtype.method.Name),
-			request:     argv.Interface(),
+			body:        b,
+			payload:     argv.Interface(),
 		}
 
 		// define the handler func
 		fn := func(ctx context.Context, req server.Request, rsp interface{}) error {
-			returnValues = function.Call([]reflect.Value{service.rcvr, mtype.prepareContext(ctx), reflect.ValueOf(req.Request()), reflect.ValueOf(rsp)})
+			returnValues = function.Call([]reflect.Value{service.rcvr, mtype.prepareContext(ctx), reflect.ValueOf(argv.Interface()), reflect.ValueOf(rsp)})
 
 			// The return value for the method is an error.
 			if err := returnValues[0].Interface(); err != nil {
@@ -369,6 +280,9 @@ func (g *grpcServer) processRequest(t transport.ServerTransport, stream *transpo
 			fn = g.opts.HdlrWrappers[i-1](fn)
 		}
 
+		statusCode := codes.OK
+		statusDesc := ""
+
 		// execute the handler
 		if appErr := fn(ctx, r, replyv.Interface()); appErr != nil {
 			if err, ok := appErr.(*rpcError); ok {
@@ -381,34 +295,16 @@ func (g *grpcServer) processRequest(t transport.ServerTransport, stream *transpo
 				statusCode = convertCode(appErr)
 				statusDesc = appErr.Error()
 			}
-			if err := t.WriteStatus(stream, status.New(statusCode, statusDesc)); err != nil {
-				log.Logf("grpc: Server.processUnaryRPC failed to write status: %v", err)
-				return err
-			}
-			return nil
+			return status.New(statusCode, statusDesc).Err()
 		}
-		opts := &transport.Options{
-			Last:  true,
-			Delay: false,
-		}
-		if err := g.sendResponse(t, stream, replyv.Interface(), codec, opts); err != nil {
-			switch err := err.(type) {
-			case transport.ConnectionError:
-				// Nothing to do here.
-			case transport.StreamError:
-				statusCode = err.Code
-				statusDesc = err.Desc
-			default:
-				statusCode = codes.Unknown
-				statusDesc = err.Error()
-			}
+		if err := stream.SendMsg(replyv.Interface()); err != nil {
 			return err
 		}
-		return t.WriteStatus(stream, status.New(statusCode, statusDesc))
+		return status.New(statusCode, statusDesc).Err()
 	}
 }
 
-func (g *grpcServer) processStream(t transport.ServerTransport, stream *transport.Stream, service *service, mtype *methodType, codec grpc.Codec, ct string, ctx context.Context) (err error) {
+func (g *grpcServer) processStream(stream grpc.ServerStream, service *service, mtype *methodType, ct string, ctx context.Context) error {
 	opts := g.opts
 
 	r := &rpcRequest{
@@ -419,12 +315,8 @@ func (g *grpcServer) processStream(t transport.ServerTransport, stream *transpor
 	}
 
 	ss := &rpcStream{
-		request:    r,
-		t:          t,
-		s:          stream,
-		p:          &parser{r: stream},
-		codec:      codec,
-		maxMsgSize: defaultMaxMsgSize,
+		request: r,
+		s:       stream,
 	}
 
 	function := mtype.method.Func
@@ -444,40 +336,24 @@ func (g *grpcServer) processStream(t transport.ServerTransport, stream *transpor
 		fn = opts.HdlrWrappers[i-1](fn)
 	}
 
+	statusCode := codes.OK
+	statusDesc := ""
+
 	appErr := fn(ctx, r, ss)
 	if appErr != nil {
 		if err, ok := appErr.(*rpcError); ok {
-			ss.statusCode = err.code
-			ss.statusDesc = err.desc
+			statusCode = err.code
+			statusDesc = err.desc
 		} else if err, ok := appErr.(*errors.Error); ok {
-			ss.statusCode = microError(err)
-			ss.statusDesc = appErr.Error()
-		} else if err, ok := appErr.(transport.StreamError); ok {
-			ss.statusCode = err.Code
-			ss.statusDesc = err.Desc
+			statusCode = microError(err)
+			statusDesc = appErr.Error()
 		} else {
-			ss.statusCode = convertCode(appErr)
-			ss.statusDesc = appErr.Error()
+			statusCode = convertCode(appErr)
+			statusDesc = appErr.Error()
 		}
 	}
 
-	return t.WriteStatus(ss.s, status.New(ss.statusCode, ss.statusDesc))
-}
-
-func (g *grpcServer) newGRPCCodec(contentType string) (grpc.Codec, error) {
-	codecs := make(map[string]grpc.Codec)
-	if g.opts.Context != nil {
-		if v := g.opts.Context.Value(codecsKey{}); v != nil {
-			codecs = v.(map[string]grpc.Codec)
-		}
-	}
-	if c, ok := codecs[contentType]; ok {
-		return c, nil
-	}
-	if c, ok := defaultGRPCCodecs[contentType]; ok {
-		return c, nil
-	}
-	return nil, fmt.Errorf("Unsupported Content-Type: %s", contentType)
+	return status.New(statusCode, statusDesc).Err()
 }
 
 func (g *grpcServer) newCodec(contentType string) (codec.NewCodec, error) {
@@ -496,9 +372,7 @@ func (g *grpcServer) Options() server.Options {
 }
 
 func (g *grpcServer) Init(opts ...server.Option) error {
-	for _, opt := range opts {
-		opt(&g.opts)
-	}
+	g.configure(opts...)
 	return nil
 }
 
@@ -744,20 +618,51 @@ func (g *grpcServer) Start() error {
 	g.opts.Address = ts.Addr().String()
 	g.Unlock()
 
+	// register
+	g.Register()
+
 	// micro: go ts.Accept(s.accept)
-	go g.serve(ts)
+	go g.srv.Serve(ts)
 
 	go func() {
-		// wait for exit
-		ch := <-g.exit
+		t := new(time.Ticker)
+
+		// only process if it exists
+		if g.opts.RegisterInterval > time.Duration(0) {
+			// new ticker
+			t = time.NewTicker(g.opts.RegisterInterval)
+		}
+
+		// return error chan
+		var ch chan error
+
+	Loop:
+		for {
+			select {
+			// register self on interval
+			case <-t.C:
+				if err := g.Register(); err != nil {
+					log.Log("Server register error: ", err)
+				}
+			// wait for exit
+			case ch = <-g.exit:
+				break Loop
+			}
+		}
+
+		// deregister
+		g.Deregister()
 
 		// wait for waitgroup
 		if wait(g.opts.Context) {
 			g.wg.Wait()
 		}
 
+		// stop the grpc server
+		g.srv.GracefulStop()
+
 		// close transport
-		ch <- ts.Close()
+		ch <- nil
 
 		// disconnect broker
 		config.Broker.Disconnect()

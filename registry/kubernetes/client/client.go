@@ -64,7 +64,9 @@ func detectNamespace() (string, error) {
 // NewClientByHost sets up a client by host
 func NewClientByHost(host string) Kubernetes {
 	tr := &http.Transport{
-		TLSClientConfig:    &tls.Config{},
+		TLSClientConfig: &tls.Config{
+			InsecureSkipVerify: true,
+		},
 		DisableCompression: true,
 	}
 

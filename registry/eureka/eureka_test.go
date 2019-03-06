@@ -19,7 +19,7 @@ func TestRegistration(t *testing.T) {
 		callCountHeartbeat   int
 	}{
 		{errors.New("Instance not existing"), 1, 1, 0}, // initial register
-		{nil, 1, 0, 1},                                 // subsequent register
+		{nil, 1, 0, 1}, // subsequent register
 	}
 
 	eureka := NewRegistry().(*eurekaRegistry)

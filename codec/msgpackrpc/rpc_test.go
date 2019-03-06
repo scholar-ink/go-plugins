@@ -10,7 +10,7 @@ import (
 
 func TestRequest(t *testing.T) {
 	r1 := Request{
-		ID:     100,
+		ID:     "100",
 		Method: "Call",
 		Body:   nil,
 	}
@@ -34,7 +34,7 @@ func TestRequest(t *testing.T) {
 
 func TestResponse(t *testing.T) {
 	r1 := Response{
-		ID:    100,
+		ID:    "100",
 		Error: "error",
 	}
 
@@ -80,7 +80,7 @@ func TestNotification(t *testing.T) {
 
 func BenchmarkRequestEncode(b *testing.B) {
 	r := Request{
-		ID:     100,
+		ID:     "100",
 		Method: "Call",
 		Body:   nil,
 	}
@@ -97,7 +97,7 @@ func BenchmarkRequestEncode(b *testing.B) {
 
 func BenchmarkRequestDecode(b *testing.B) {
 	r := Request{
-		ID:     100,
+		ID:     "100",
 		Method: "Call",
 		Body:   nil,
 	}
@@ -117,7 +117,7 @@ func BenchmarkRequestDecode(b *testing.B) {
 
 func BenchmarkResponseEncode(b *testing.B) {
 	r := Response{
-		ID:    100,
+		ID:    "100",
 		Error: "error",
 		Body:  nil,
 	}
@@ -134,7 +134,7 @@ func BenchmarkResponseEncode(b *testing.B) {
 
 func BenchmarkResponseDecode(b *testing.B) {
 	r := Response{
-		ID:    100,
+		ID:    "100",
 		Error: "error",
 		Body:  nil,
 	}

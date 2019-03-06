@@ -19,11 +19,6 @@ import (
 )
 
 var (
-	// A value sent as a placeholder for the server's response value when the server
-	// receives an invalid request. It is never decoded by the client since the Response
-	// contains an error when it is used.
-	invalidRequest = struct{}{}
-
 	// Precompute the reflect type for error. Can't use error directly
 	// because Typeof takes an empty interface value. This is annoying.
 	typeOfError = reflect.TypeOf((*error)(nil)).Elem()
@@ -66,15 +61,15 @@ func isExportedOrBuiltinType(t reflect.Type) bool {
 	return isExported(t.Name()) || t.PkgPath() == ""
 }
 
-// prepareMethod returns a methodType for the provided method or nil
+// prepareEndpoint() returns a methodType for the provided method or nil
 // in case if the method was unsuitable.
-func prepareMethod(method reflect.Method) *methodType {
+func prepareEndpoint(method reflect.Method) *methodType {
 	mtype := method.Type
 	mname := method.Name
 	var replyType, argType, contextType reflect.Type
 	var stream bool
 
-	// Method must be exported.
+	// Endpoint() must be exported.
 	if method.PkgPath != "" {
 		return nil
 	}
@@ -123,7 +118,7 @@ func prepareMethod(method reflect.Method) *methodType {
 		}
 	}
 
-	// Method needs one out.
+	// Endpoint() needs one out.
 	if mtype.NumOut() != 1 {
 		log.Log("method", mname, "has wrong number of outs:", mtype.NumOut())
 		return nil
@@ -163,7 +158,7 @@ func (server *rServer) register(rcvr interface{}) error {
 	// Install the methods
 	for m := 0; m < s.typ.NumMethod(); m++ {
 		method := s.typ.Method(m)
-		if mt := prepareMethod(method); mt != nil {
+		if mt := prepareEndpoint(method); mt != nil {
 			s.method[method.Name] = mt
 		}
 	}

@@ -156,7 +156,12 @@ func (r *router) Init(ctx *cli.Context) error {
 			return errors.New("Unknown config source " + c)
 		}
 
-		conf = config.NewConfig(config.WithSource(source))
+		// set config
+		conf = config.NewConfig()
+		// load source
+		if err := conf.Load(source); err != nil {
+			return err
+		}
 	} else {
 		conf = r.opts.Config
 	}
@@ -180,9 +185,10 @@ func NewRouter(opts ...Option) plugin.Plugin {
 		opts: options,
 	}
 
-	if options.Config != nil {
+	// update routes now if config exists
+	if c := options.Config; c != nil {
 		var routes Routes
-		if err := options.Config.Get(DefaultPath...).Scan(&routes); err == nil {
+		if err := c.Get(DefaultPath...).Scan(&routes); err == nil {
 			r.update(routes)
 		}
 	}

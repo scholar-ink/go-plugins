@@ -1,11 +1,18 @@
 package grpc
 
+import (
+	"github.com/micro/go-micro/codec"
+)
+
 type rpcRequest struct {
 	service     string
 	method      string
 	contentType string
-	request     interface{}
+	codec       codec.Codec
+	header      map[string]string
+	body        []byte
 	stream      bool
+	payload     interface{}
 }
 
 type rpcMessage struct {
@@ -26,12 +33,28 @@ func (r *rpcRequest) Method() string {
 	return r.method
 }
 
-func (r *rpcRequest) Request() interface{} {
-	return r.request
+func (r *rpcRequest) Endpoint() string {
+	return r.method
+}
+
+func (r *rpcRequest) Codec() codec.Reader {
+	return r.codec
+}
+
+func (r *rpcRequest) Header() map[string]string {
+	return r.header
+}
+
+func (r *rpcRequest) Read() ([]byte, error) {
+	return r.body, nil
 }
 
 func (r *rpcRequest) Stream() bool {
 	return r.stream
+}
+
+func (r *rpcRequest) Body() interface{} {
+	return r.payload
 }
 
 func (r *rpcMessage) ContentType() string {

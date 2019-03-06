@@ -25,6 +25,10 @@ func nodePath(s, id string) string {
 	return path.Join(prefix, service, node)
 }
 
+func childPath(parent, child string) string {
+	return path.Join(parent, strings.Replace(child, "/", "-", -1))
+}
+
 func servicePath(s string) string {
 	return path.Join(prefix, strings.Replace(s, "/", "-", -1))
 }

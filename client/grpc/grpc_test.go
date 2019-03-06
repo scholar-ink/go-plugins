@@ -9,7 +9,7 @@ import (
 
 	"github.com/micro/go-micro/client"
 	"github.com/micro/go-micro/registry"
-	"github.com/micro/go-micro/registry/mock"
+	"github.com/micro/go-micro/registry/memory"
 	"github.com/micro/go-micro/selector"
 	pgrpc "google.golang.org/grpc"
 	pb "google.golang.org/grpc/examples/helloworld/helloworld"
@@ -41,7 +41,7 @@ func TestGRPCClient(t *testing.T) {
 	addr := strings.Join(parts[:len(parts)-1], ":")
 
 	// create mock registry
-	r := mock.NewRegistry()
+	r := memory.NewRegistry()
 
 	// register service
 	r.Register(&registry.Service{

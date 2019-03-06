@@ -31,6 +31,81 @@ func init() {
 	cmd.DefaultRegistries["etcd"] = NewRegistry
 }
 
+func configure(e *etcdRegistry, opts ...registry.Option) error {
+	config := etcd.Config{
+		Endpoints: []string{"http://127.0.0.1:2379"},
+	}
+
+	for _, o := range opts {
+		o(&e.options)
+	}
+
+	if e.options.Timeout == 0 {
+		e.options.Timeout = etcd.DefaultRequestTimeout
+	}
+
+	if e.options.Secure || e.options.TLSConfig != nil {
+		tlsConfig := e.options.TLSConfig
+		if tlsConfig == nil {
+			tlsConfig = &tls.Config{
+				InsecureSkipVerify: true,
+			}
+		}
+
+		// for InsecureSkipVerify
+		t := &http.Transport{
+			Proxy: http.ProxyFromEnvironment,
+			Dial: (&net.Dialer{
+				Timeout:   30 * time.Second,
+				KeepAlive: 30 * time.Second,
+			}).Dial,
+			TLSHandshakeTimeout: 10 * time.Second,
+			TLSClientConfig:     tlsConfig,
+		}
+
+		runtime.SetFinalizer(&t, func(tr **http.Transport) {
+			(*tr).CloseIdleConnections()
+		})
+
+		config.Transport = t
+
+		// default secure address
+		config.Endpoints = []string{"https://127.0.0.1:2379"}
+	}
+
+	var cAddrs []string
+
+	for _, addr := range e.options.Addrs {
+		if len(addr) == 0 {
+			continue
+		}
+
+		if e.options.Secure {
+			// replace http:// with https:// if its there
+			addr = strings.Replace(addr, "http://", "https://", 1)
+
+			// has the prefix? no... ok add it
+			if !strings.HasPrefix(addr, "https://") {
+				addr = "https://" + addr
+			}
+		}
+
+		cAddrs = append(cAddrs, addr)
+	}
+
+	// if we got addrs then we'll update
+	if len(cAddrs) > 0 {
+		config.Endpoints = cAddrs
+	}
+
+	c, err := etcd.New(config)
+	if err != nil {
+		return err
+	}
+	e.client = etcd.NewKeysAPI(c)
+	return nil
+}
+
 func encode(s *registry.Service) string {
 	b, _ := json.Marshal(s)
 	return string(b)
@@ -50,6 +125,10 @@ func nodePath(s, id string) string {
 
 func servicePath(s string) string {
 	return path.Join(prefix, strings.Replace(s, "/", "-", -1))
+}
+
+func (e *etcdRegistry) Init(opts ...registry.Option) error {
+	return configure(e, opts...)
 }
 
 func (e *etcdRegistry) Options() registry.Options {
@@ -191,79 +270,9 @@ func (e *etcdRegistry) String() string {
 }
 
 func NewRegistry(opts ...registry.Option) registry.Registry {
-	config := etcd.Config{
-		Endpoints: []string{"http://127.0.0.1:2379"},
-	}
-
-	var options registry.Options
-	for _, o := range opts {
-		o(&options)
-	}
-
-	if options.Timeout == 0 {
-		options.Timeout = etcd.DefaultRequestTimeout
-	}
-
-	if options.Secure || options.TLSConfig != nil {
-		tlsConfig := options.TLSConfig
-		if tlsConfig == nil {
-			tlsConfig = &tls.Config{
-				InsecureSkipVerify: true,
-			}
-		}
-
-		// for InsecureSkipVerify
-		t := &http.Transport{
-			Proxy: http.ProxyFromEnvironment,
-			Dial: (&net.Dialer{
-				Timeout:   30 * time.Second,
-				KeepAlive: 30 * time.Second,
-			}).Dial,
-			TLSHandshakeTimeout: 10 * time.Second,
-			TLSClientConfig:     tlsConfig,
-		}
-
-		runtime.SetFinalizer(&t, func(tr **http.Transport) {
-			(*tr).CloseIdleConnections()
-		})
-
-		config.Transport = t
-
-		// default secure address
-		config.Endpoints = []string{"https://127.0.0.1:2379"}
-	}
-
-	var cAddrs []string
-
-	for _, addr := range options.Addrs {
-		if len(addr) == 0 {
-			continue
-		}
-
-		if options.Secure {
-			// replace http:// with https:// if its there
-			addr = strings.Replace(addr, "http://", "https://", 1)
-
-			// has the prefix? no... ok add it
-			if !strings.HasPrefix(addr, "https://") {
-				addr = "https://" + addr
-			}
-		}
-
-		cAddrs = append(cAddrs, addr)
-	}
-
-	// if we got addrs then we'll update
-	if len(cAddrs) > 0 {
-		config.Endpoints = cAddrs
-	}
-
-	c, _ := etcd.New(config)
-
 	e := &etcdRegistry{
-		client:  etcd.NewKeysAPI(c),
-		options: options,
+		options: registry.Options{},
 	}
-
+	configure(e, opts...)
 	return e
 }

@@ -2,7 +2,7 @@
 
 The CORS plugin enables the configuration of CORS headers when running micro.
 
-## Usage
+## Usage
 
 Register the plugin before building Micro
 
@@ -21,7 +21,7 @@ func init() {
 
 ## Configuration
 
-### Environment variables
+### Environment variables
 
 ```
 CORS_ALLOWED_HEADERS="X-Custom-Header"
@@ -29,7 +29,7 @@ CORS_ALLOWED_ORIGINS="*"
 CORS_ALLOWED_METHODS="POST"
 ```
 
-### Command line
+### Command line
 ```
 $ micro api \
     --cors-allowed-headers=X-Custom-Header \
