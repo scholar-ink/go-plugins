@@ -33,6 +33,9 @@ func traceIntoContext(ctx context.Context, tracer opentracing.Tracer, name strin
 	if err := sp.Tracer().Inject(sp.Context(), opentracing.TextMap, opentracing.TextMapCarrier(md)); err != nil {
 		return nil, nil, err
 	}
+	if requestId,ok := md["Request-Id"];ok {
+		sp.SetTag("Request-Id",requestId)
+	}
 	ctx = opentracing.ContextWithSpan(ctx, sp)
 	ctx = metadata.NewContext(ctx, md)
 	return ctx, sp, nil
