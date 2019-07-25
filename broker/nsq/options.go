@@ -6,7 +6,6 @@ import (
 
 	"github.com/micro/go-micro/broker"
 	nsq "github.com/nsqio/go-nsq"
-	"github.com/scholar-ink/protobuf/ptypes/duration"
 )
 
 type ConcurrentHandlerKey struct{}
@@ -46,7 +45,7 @@ func WithMaxAttempts(n uint16) broker.SubscribeOption {
 	}
 }
 
-func WithRequeueDelay(time duration.Duration) broker.SubscribeOption {
+func WithRequeueDelay(time time.Duration) broker.SubscribeOption {
 	return func(o *broker.SubscribeOptions) {
 		if o.Context == nil {
 			o.Context = context.Background()
@@ -55,7 +54,7 @@ func WithRequeueDelay(time duration.Duration) broker.SubscribeOption {
 	}
 }
 
-func WithMaxRequeueDelay(time duration.Duration) broker.SubscribeOption {
+func WithMaxRequeueDelay(time time.Duration) broker.SubscribeOption {
 	return func(o *broker.SubscribeOptions) {
 		if o.Context == nil {
 			o.Context = context.Background()
