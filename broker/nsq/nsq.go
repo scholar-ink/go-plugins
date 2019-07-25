@@ -46,7 +46,10 @@ type subscriber struct {
 }
 
 var (
-	DefaultConcurrentHandlers = 1
+	DefaultConcurrentHandlers        = 1
+	DefaultMaxAttempts        uint16 = 10
+	DefaultMaxRequeueDelay           = 60 * time.Minute
+	DefaultRequeueDelay              = 2 * time.Second
 )
 
 func init() {
@@ -233,7 +236,7 @@ func (n *nsqBroker) Subscribe(topic string, handler broker.Handler, opts ...brok
 		o(&options)
 	}
 
-	concurrency, maxInFlight := DefaultConcurrentHandlers, DefaultConcurrentHandlers
+	concurrency, maxInFlight, maxAttempts, maxRequeueDelay, requeueDelay := DefaultConcurrentHandlers, DefaultConcurrentHandlers, DefaultMaxAttempts, DefaultMaxRequeueDelay, DefaultRequeueDelay
 	if options.Context != nil {
 		if v, ok := options.Context.Value(concurrentHandlerKey{}).(int); ok {
 			maxInFlight, concurrency = v, v
@@ -248,6 +251,9 @@ func (n *nsqBroker) Subscribe(topic string, handler broker.Handler, opts ...brok
 	}
 	config := *n.config
 	config.MaxInFlight = maxInFlight
+	config.MaxAttempts = maxAttempts
+	config.MaxRequeueDelay = maxRequeueDelay
+	config.DefaultRequeueDelay = requeueDelay
 
 	c, err := nsq.NewConsumer(topic, channel, &config)
 	if err != nil {
