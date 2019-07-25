@@ -9,11 +9,11 @@ import (
 	"github.com/scholar-ink/protobuf/ptypes/duration"
 )
 
-type concurrentHandlerKey struct{}
-type maxInFlightKey struct{}
-type maxAttemptsKey struct{}
-type requeueDelayKey struct{}
-type maxRequeueDelayKey struct{}
+type ConcurrentHandlerKey struct{}
+type MaxInFlightKey struct{}
+type MaxAttemptsKey struct{}
+type RequeueDelayKey struct{}
+type MaxRequeueDelayKey struct{}
 type asyncPublishKey struct{}
 type deferredPublishKey struct{}
 type lookupdAddrsKey struct{}
@@ -24,7 +24,7 @@ func WithConcurrentHandlers(n int) broker.SubscribeOption {
 		if o.Context == nil {
 			o.Context = context.Background()
 		}
-		o.Context = context.WithValue(o.Context, concurrentHandlerKey{}, n)
+		o.Context = context.WithValue(o.Context, ConcurrentHandlerKey{}, n)
 	}
 }
 
@@ -33,7 +33,7 @@ func WithMaxInFlight(n int) broker.SubscribeOption {
 		if o.Context == nil {
 			o.Context = context.Background()
 		}
-		o.Context = context.WithValue(o.Context, maxInFlightKey{}, n)
+		o.Context = context.WithValue(o.Context, MaxInFlightKey{}, n)
 	}
 }
 
@@ -42,7 +42,7 @@ func WithMaxAttempts(n uint16) broker.SubscribeOption {
 		if o.Context == nil {
 			o.Context = context.Background()
 		}
-		o.Context = context.WithValue(o.Context, maxAttemptsKey{}, n)
+		o.Context = context.WithValue(o.Context, MaxAttemptsKey{}, n)
 	}
 }
 
@@ -51,7 +51,7 @@ func WithRequeueDelay(time duration.Duration) broker.SubscribeOption {
 		if o.Context == nil {
 			o.Context = context.Background()
 		}
-		o.Context = context.WithValue(o.Context, requeueDelayKey{}, time)
+		o.Context = context.WithValue(o.Context, RequeueDelayKey{}, time)
 	}
 }
 
@@ -60,7 +60,7 @@ func WithMaxRequeueDelay(time duration.Duration) broker.SubscribeOption {
 		if o.Context == nil {
 			o.Context = context.Background()
 		}
-		o.Context = context.WithValue(o.Context, maxRequeueDelayKey{}, time)
+		o.Context = context.WithValue(o.Context, MaxRequeueDelayKey{}, time)
 	}
 }
 

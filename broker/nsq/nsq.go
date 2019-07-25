@@ -46,10 +46,10 @@ type subscriber struct {
 }
 
 var (
-	DefaultConcurrentHandlers        = 1
-	DefaultMaxAttempts        uint16 = 10
-	DefaultMaxRequeueDelay           = 60 * time.Minute
-	DefaultRequeueDelay              = 2 * time.Second
+	DefaultConcurrentHandlers = 1
+	DefaultMaxAttempts        = 10
+	DefaultMaxRequeueDelay    = 60 * time.Minute
+	DefaultRequeueDelay       = 2 * time.Second
 )
 
 func init() {
@@ -238,19 +238,19 @@ func (n *nsqBroker) Subscribe(topic string, handler broker.Handler, opts ...brok
 
 	concurrency, maxInFlight, maxAttempts, maxRequeueDelay, requeueDelay := DefaultConcurrentHandlers, DefaultConcurrentHandlers, DefaultMaxAttempts, DefaultMaxRequeueDelay, DefaultRequeueDelay
 	if options.Context != nil {
-		if v, ok := options.Context.Value(concurrentHandlerKey{}).(int); ok {
+		if v, ok := options.Context.Value(ConcurrentHandlerKey{}).(int); ok {
 			maxInFlight, concurrency = v, v
 		}
-		if v, ok := options.Context.Value(maxInFlightKey{}).(int); ok {
+		if v, ok := options.Context.Value(MaxInFlightKey{}).(int); ok {
 			maxInFlight = v
 		}
-		if v, ok := options.Context.Value(maxAttemptsKey{}).(uint16); ok {
+		if v, ok := options.Context.Value(MaxAttemptsKey{}).(int); ok {
 			maxAttempts = v
 		}
-		if v, ok := options.Context.Value(maxRequeueDelayKey{}).(time.Duration); ok {
+		if v, ok := options.Context.Value(MaxRequeueDelayKey{}).(time.Duration); ok {
 			maxRequeueDelay = v
 		}
-		if v, ok := options.Context.Value(maxInFlightKey{}).(time.Duration); ok {
+		if v, ok := options.Context.Value(RequeueDelayKey{}).(time.Duration); ok {
 			requeueDelay = v
 		}
 	}
@@ -260,7 +260,7 @@ func (n *nsqBroker) Subscribe(topic string, handler broker.Handler, opts ...brok
 	}
 	config := *n.config
 	config.MaxInFlight = maxInFlight
-	config.MaxAttempts = maxAttempts
+	config.MaxAttempts = uint16(maxAttempts)
 	config.MaxRequeueDelay = maxRequeueDelay
 	config.DefaultRequeueDelay = requeueDelay
 
