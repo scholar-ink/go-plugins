@@ -6,10 +6,14 @@ import (
 
 	"github.com/micro/go-micro/broker"
 	nsq "github.com/nsqio/go-nsq"
+	"github.com/scholar-ink/protobuf/ptypes/duration"
 )
 
 type concurrentHandlerKey struct{}
 type maxInFlightKey struct{}
+type maxAttemptsKey struct{}
+type requeueDelayKey struct{}
+type maxRequeueDelayKey struct{}
 type asyncPublishKey struct{}
 type deferredPublishKey struct{}
 type lookupdAddrsKey struct{}
@@ -30,6 +34,33 @@ func WithMaxInFlight(n int) broker.SubscribeOption {
 			o.Context = context.Background()
 		}
 		o.Context = context.WithValue(o.Context, maxInFlightKey{}, n)
+	}
+}
+
+func WithMaxAttempts(n uint16) broker.SubscribeOption {
+	return func(o *broker.SubscribeOptions) {
+		if o.Context == nil {
+			o.Context = context.Background()
+		}
+		o.Context = context.WithValue(o.Context, maxAttemptsKey{}, n)
+	}
+}
+
+func WithRequeueDelay(time duration.Duration) broker.SubscribeOption {
+	return func(o *broker.SubscribeOptions) {
+		if o.Context == nil {
+			o.Context = context.Background()
+		}
+		o.Context = context.WithValue(o.Context, requeueDelayKey{}, time)
+	}
+}
+
+func WithMaxRequeueDelay(time duration.Duration) broker.SubscribeOption {
+	return func(o *broker.SubscribeOptions) {
+		if o.Context == nil {
+			o.Context = context.Background()
+		}
+		o.Context = context.WithValue(o.Context, maxRequeueDelayKey{}, time)
 	}
 }
 

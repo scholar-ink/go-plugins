@@ -244,6 +244,15 @@ func (n *nsqBroker) Subscribe(topic string, handler broker.Handler, opts ...brok
 		if v, ok := options.Context.Value(maxInFlightKey{}).(int); ok {
 			maxInFlight = v
 		}
+		if v, ok := options.Context.Value(maxAttemptsKey{}).(uint16); ok {
+			maxAttempts = v
+		}
+		if v, ok := options.Context.Value(maxRequeueDelayKey{}).(time.Duration); ok {
+			maxRequeueDelay = v
+		}
+		if v, ok := options.Context.Value(maxInFlightKey{}).(time.Duration); ok {
+			requeueDelay = v
+		}
 	}
 	channel := options.Queue
 	if len(channel) == 0 {
